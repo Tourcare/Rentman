@@ -11,4 +11,4 @@ app.post("/", async (req, res) => {
 });
 
 
-app.listen(8080, () => console.log("Webhook API kører på port 8080"));
+app.listen(80, () => console.log("Webhook API kører på port 8080"));
