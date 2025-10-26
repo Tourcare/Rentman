@@ -344,7 +344,7 @@ async function syncProjects() {
                     order_id = await hubspotCreateOrder(subproject, deal_id, companyRows[0].hubspot_id, contactRows[0].hubspot_id)
                     await pool.query(
                         'INSERT INTO synced_order (subproject_name, rentman_subproject_id, hubspot_order_id, synced_companies_id, synced_contact_id, synced_deals_id) VALUES (?, ?, ?, ?, ?, ?)',
-                        [project.displayname, projectInfo.id, order_id, companyRows[0].id, contactRows[0].id, dealRows[0].id]
+                        [subproject.displayname, subproject.id, order_id, companyRows[0].id, contactRows[0].id, dealRows[0].id]
                     );
                 }
 
@@ -364,7 +364,7 @@ async function syncProjects() {
                 order_id = await hubspotCreateOrder(subproject, deal_id, companyRows[0].hubspot_id)
                 await pool.query(
                     'INSERT INTO synced_order (subproject_name, rentman_subproject_id, hubspot_order_id, synced_companies_id, synced_deals_id) VALUES (?, ?, ?, ?, ?)',
-                    [project.displayname, projectInfo.id, order_id, companyRows[0].id, dealRows[0].id]
+                    [subproject.displayname, subproject.id, order_id, companyRows[0].id, dealRows[0].id]
                 );
             }
 
