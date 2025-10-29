@@ -92,7 +92,7 @@ router.post("/", async (req, res) => {
                 console.log("Det er deal")
                 const deal = await hubspotGetFromEndpoint(event.objectTypeId, event.objectId);
                 if (deal.properties.usage_period && deal.properties.slut_projekt_period) {
-                    const rentman = await rentmanPostRentalRequest(data)
+                    const rentman = await rentmanPostRentalRequest(deal)
                     console.log("Har en projektperiode!")
                 } else {
                     console.log("Mangler projektperiode!")
