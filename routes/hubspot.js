@@ -50,7 +50,7 @@ async function hubspotGetFromEndpoint(type, id) {
 
 
 
-async function rentmanPostRentalRequest(data) {
+async function rentmanPostRentalRequest(data, contact) {
     const url = `${RENTMAN_API_BASE}/projectrequests`;
 
     const end = new Date(data.properties.usage_period)
@@ -59,7 +59,8 @@ async function rentmanPostRentalRequest(data) {
     const body = {
         "name": data.properties.dealname,
         "planperiod_end": end,
-        "planperiod_start": start
+        "planperiod_start": start,
+        "linked_contact": `/contacts/${contact}`
     }
 
     const response = await fetch(url, {
