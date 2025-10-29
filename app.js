@@ -31,60 +31,8 @@ app.post("/", async (req, res) => {
     res.status(200).send("OK");
 });
 
+const hubspotRouter = require('./routes/hubspot')
 
-async function hubspotGetFromEndpoint(type, id) {
-    let paramter = ""
-    if (type === "0-3") {
-        parameter = "?properties=dealname,usage_period,slut_projekt_period"
-    }
-    const url = `${HUBSPOT_ENDPOINT}${type}/${id}${parameter}`;
-
-    const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-            'Accept': 'application/json',
-            'Authorization': `Bearer ${HUBSPOT_TOKEN}`,
-        }
-    });
-
-    if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`HTTP error! status: ${response.status}, message: ${errText}`);
-    }
-
-    const output = await response.json();
-    return output
-}
-
-
-app.post("/hubspot", async (req, res) => {
-    const event = req.body;
-    console.log(event)
-    if (event[0].subscriptionType === "object.creation") {
-        console.log("Det er creation")
-        if (event[0].objectTypeId === "0-3") {
-            console.log("Det er deal")
-            const deal = await hubspotGetFromEndpoint(event[0].objectTypeId, event[0].objectId);
-            if (deal.properties.usage_period && deal.properties.slut_projekt_period) {
-                console.log("Har en projektperiode!")
-            } else {
-                console.log("Mangler projektperiode!")
-            }
-        }
-    } else if (event[0].subscriptionType === "object.propertyChange") {
-        console.log("Det er change")
-        if (event[0].objectTypeId === "0-3") {
-            console.log("Det er deal")
-            const deal = await hubspotGetFromEndpoint(event[0].objectTypeId, event[0].objectId);
-            if (deal.properties.usage_period && deal.properties.slut_projekt_period) {
-                console.log("Har en projektperiode!")
-            } else {
-                console.log("Mangler projektperiode!")
-            }
-        }
-    }
-
-    res.status(200).send("OK");
-});
+app.use('/hubspot', hubspotRouter)
 
 app.listen(8080, () => console.log("Webhook API kører på port 8080"));
