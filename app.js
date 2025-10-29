@@ -11,4 +11,11 @@ app.post("/", async (req, res) => {
 });
 
 
+app.post("/hubspot", async (req, res) => {
+    const event = req.body;
+    console.log(event);
+
+    res.status(200).send("OK");
+});
+
 app.listen(8080, () => console.log("Webhook API kører på port 8080"));
