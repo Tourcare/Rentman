@@ -99,7 +99,7 @@ router.post("/", async (req, res) => {
 
                         deal.associations.companies.results.forEach(async association => {
                             if (association.type === "deal_to_company") {
-                                const [company] = await pool.execute('SELECT * FROM synced_companies WHERE hubspot_id = ?', [deal.associations.companies.results.id])
+                                const [company] = await pool.execute('SELECT * FROM synced_companies WHERE hubspot_id = ?', [association.id])
 
                                 const rentman = await rentmanPostRentalRequest(deal, company[0].rentman_id)
                                 console.log("Har en projektperiode!")
