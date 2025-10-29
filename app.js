@@ -43,7 +43,7 @@ async function hubspotGetFromEndpoint(type, id) {
         method: 'GET',
         headers: {
             'Accept': 'application/json',
-            'Authorization': `Bearer ${HUBSPOT_ENDPOINT}`,
+            'Authorization': `Bearer ${HUBSPOT_TOKEN}`,
         }
     });
 
