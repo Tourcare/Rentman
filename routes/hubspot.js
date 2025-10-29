@@ -58,8 +58,8 @@ async function rentmanPostRentalRequest(data) {
 
     const body = {
         "name": data.properties.dealname,
-        "planperiod_end": end,
-        "planperiod_start": start
+        "planperiod_end": data.properties.usage_period,
+        "planperiod_start": data.properties.slut_projekt_period
     }
 
     const response = await fetch(url, {
