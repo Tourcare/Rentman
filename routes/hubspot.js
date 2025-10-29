@@ -85,30 +85,33 @@ async function rentmanPostRentalRequest(data) {
 router.post("/", async (req, res) => {
     const event = req.body;
     console.log(event)
-    if (event[0].subscriptionType === "object.creation") {
-        console.log("Det er creation")
-        if (event[0].objectTypeId === "0-3") {
-            console.log("Det er deal")
-            const deal = await hubspotGetFromEndpoint(event[0].objectTypeId, event[0].objectId);
-            if (deal.properties.usage_period && deal.properties.slut_projekt_period) {
-                const rentman = await rentmanPostRentalRequest(data)
-                console.log("Har en projektperiode!")
-            } else {
-                console.log("Mangler projektperiode!")
+    event.forEach(async event => {
+        if (event.subscriptionType === "object.creation") {
+            console.log("Det er creation")
+            if (event.objectTypeId === "0-3") {
+                console.log("Det er deal")
+                const deal = await hubspotGetFromEndpoint(event.objectTypeId, event.objectId);
+                if (deal.properties.usage_period && deal.properties.slut_projekt_period) {
+                    const rentman = await rentmanPostRentalRequest(data)
+                    console.log("Har en projektperiode!")
+                } else {
+                    console.log("Mangler projektperiode!")
+                }
+            }
+        } else if (event.subscriptionType === "object.propertyChange") {
+            console.log("Det er change")
+            if (event.objectTypeId === "0-3") {
+                console.log("Det er deal")
+                const deal = await hubspotGetFromEndpoint(event.objectTypeId, event.objectId);
+                if (deal.properties.usage_period && deal.properties.slut_projekt_period) {
+                    console.log("Har en projektperiode!")
+                } else {
+                    console.log("Mangler projektperiode!")
+                }
             }
         }
-    } else if (event[0].subscriptionType === "object.propertyChange") {
-        console.log("Det er change")
-        if (event[0].objectTypeId === "0-3") {
-            console.log("Det er deal")
-            const deal = await hubspotGetFromEndpoint(event[0].objectTypeId, event[0].objectId);
-            if (deal.properties.usage_period && deal.properties.slut_projekt_period) {
-                console.log("Har en projektperiode!")
-            } else {
-                console.log("Mangler projektperiode!")
-            }
-        }
-    }
+    });
+
 
     res.status(200).send("OK");
 });
