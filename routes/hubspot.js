@@ -27,7 +27,7 @@ router.use(express.json());
 async function hubspotGetFromEndpoint(type, id) {
     let paramter = ""
     if (type === "0-3") {
-        parameter = "?properties=dealname,usage_period,slut_projekt_period"
+        parameter = "?properties=dealname,usage_period,slut_projekt_period&associations=companies,contacts"
     }
     const url = `${HUBSPOT_ENDPOINT}${type}/${id}${parameter}`;
 
@@ -92,9 +92,22 @@ router.post("/", async (req, res) => {
             if (event.objectTypeId === "0-3") {
                 console.log("Det er deal")
                 const deal = await hubspotGetFromEndpoint(event.objectTypeId, event.objectId);
+
                 if (deal.properties.usage_period && deal.properties.slut_projekt_period) {
-                    const rentman = await rentmanPostRentalRequest(deal)
-                    console.log("Har en projektperiode!")
+
+                    if (deal.associations.companies) {
+
+                        deal.associations.companies.results.forEach(async association => {
+                            if (association.type === "deal_to_company") {
+                                const [company] = await pool.execute('SELECT * FROM synced_companies WHERE hubspot_id = ?', [deal.associations.companies.results.id])
+
+                                const rentman = await rentmanPostRentalRequest(deal, company[0].rentman_id)
+                                console.log("Har en projektperiode!")
+                            }
+
+                        })
+                    }
+
                 } else {
                     console.log("Mangler projektperiode!")
                 }
