@@ -59,8 +59,11 @@ async function hubspotGetFromEndpoint(type, id) {
 
 app.post("/hubspot", async (req, res) => {
     const event = req.body;
+    console.log(event)
     if (event.subscriptionType === "object.creation") {
+        console.log("Det er creation")
         if (event.objectTypeId === "0-3") {
+            console.log("Det er deal")
             const deal = await hubspotGetFromEndpoint(event.objectTypeId, event.objectId);
             if (deal.properties.usage_period && deal.properties.slut_projekt_period) {
                 console.log("Har en projektperiode!")
@@ -69,7 +72,9 @@ app.post("/hubspot", async (req, res) => {
             }
         }
     } else if (event.subscriptionType === "object.propertyChange") {
+        console.log("Det er change")
         if (event.objectTypeId === "0-3") {
+            console.log("Det er deal")
             const deal = await hubspotGetFromEndpoint(event.objectTypeId, event.objectId);
             if (deal.properties.usage_period && deal.properties.slut_projekt_period) {
                 console.log("Har en projektperiode!")
