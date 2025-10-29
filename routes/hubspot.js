@@ -77,6 +77,7 @@ async function rentmanPostRentalRequest(data) {
     }
 
     const output = await response.json();
+    console.log(output)
     return output
 }
 
