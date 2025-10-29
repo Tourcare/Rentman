@@ -58,14 +58,15 @@ async function rentmanPostRentalRequest(data) {
 
     const body = {
         "name": data.properties.dealname,
-        "planperiod_end": data.properties.usage_period,
-        "planperiod_start": data.properties.slut_projekt_period
+        "planperiod_end": end,
+        "planperiod_start": start
     }
 
     const response = await fetch(url, {
         method: 'POST',
         headers: {
             'Accept': 'application/json',
+            'Content-Type': 'application/json',
             'Authorization': `Bearer ${RENTMAN_API_TOKEN}`,
         },
         body: JSON.stringify(body),
