@@ -5,8 +5,8 @@ const mysql = require('mysql2/promise');
 
 dotenv.config();
 
-const pool = require('./app');
-const { hubspotDealGetFromEndpoint, rentmanPostRentalRequest, rentmanDelRentalRequest } = require('./webhooks/services/hubspot-deal');
+const pool = require('../../app');
+const { hubspotDealGetFromEndpoint, rentmanPostRentalRequest, rentmanDelRentalRequest } = require('../services/hubspot-deal');
 
 const router = express.Router();
 router.use(express.json());
