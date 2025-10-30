@@ -11,7 +11,7 @@
   "description": "",
   "main": "alldeals.js",
   "scripts": {
-    "start": "node app.js"
+    "start": "node server.js"
   },
   "keywords": [],
   "author": "",
