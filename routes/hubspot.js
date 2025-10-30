@@ -83,19 +83,18 @@ async function rentmanPostRentalRequest(data, contact) {
         body: JSON.stringify(body),
     });
 
-    const text = await response.text(); // Make sure to await
+    const text = await response.text();
 
     if (!response.ok) {
-        // Tjek om det er en "not found"-fejl
         if (text.includes('not found') || response.status === 404) {
             return false;
         }
         throw new Error(`HTTP error! status: ${response.status}, message: ${text}`);
     }
 
-    const output = await response.json();
-    console.log(output)
-    return output
+    const output = JSON.parse(text);
+    console.log(output);
+    return output;
 }
 
 
@@ -110,18 +109,19 @@ async function rentmanDelRentalRequest(id) {
             'Authorization': `Bearer ${RENTMAN_API_TOKEN}`,
         }
     });
-    const text = await response.text(); // Make sure to await
+    
+    const text = await response.text();
+
     if (!response.ok) {
-        // Tjek om det er en "not found"-fejl
         if (text.includes('not found') || response.status === 404) {
             return false;
         }
         throw new Error(`HTTP error! status: ${response.status}, message: ${text}`);
     }
 
-    const output = await response.json();
-    console.log(output)
-    return output
+    const output = JSON.parse(text);
+    console.log(output);
+    return output;
 }
 
 
