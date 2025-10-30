@@ -109,7 +109,7 @@ async function rentmanDelRentalRequest(id) {
             'Authorization': `Bearer ${RENTMAN_API_TOKEN}`,
         }
     });
-    
+
     const text = await response.text();
 
     if (!response.ok) {
@@ -135,6 +135,7 @@ router.post("/", async (req, res) => {
     let whatHappend = false;
     console.log(events)
     console.log("Hubspot webhook modtaget!")
+    res.status(200).send("OK");
     for (const event of events) {
 
         if (event.subscriptionType === "object.creation") {
@@ -218,7 +219,12 @@ router.post("/", async (req, res) => {
             console.log("Det er delete")
 
             if (event.objectTypeId === "0-3") {
-                let [request] = await pool.execute('SELECT * FROM synced_request WHERE hubspot_id = ?', [event.objectId])
+                try {
+                    let [request] = await pool.execute('SELECT * FROM synced_request WHERE hubspot_id = ?', [event.objectId])
+                } catch (err) {
+                    console.log(err)
+                }
+                
                 if (request[0].rentman_request_id) {
                     await rentmanDelRentalRequest(request[0].rentman_request_id);
                     console.log("Rental request slettet")
