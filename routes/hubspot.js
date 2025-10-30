@@ -84,8 +84,11 @@ async function rentmanPostRentalRequest(data, contact) {
     });
 
     if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`HTTP error! status: ${response.status}, message: ${errText}`);
+        // Tjek om det er en "not found"-fejl
+        if (text.includes('not found') || response.status === 404) {
+            return false;
+        }
+        throw new Error(`HTTP error! status: ${response.status}, message: ${text}`);
     }
 
     const output = await response.json();
@@ -93,40 +96,34 @@ async function rentmanPostRentalRequest(data, contact) {
     return output
 }
 
-async function rentmanCheckRentalRequest(id) {
+
+async function rentmanPostRentalRequest(id) {
     const url = `${RENTMAN_API_BASE}/projectrequests/${id}`;
 
-    try {
-        const response = await fetch(url, {
-            method: 'GET',
-            headers: {
-                'Accept': 'application/json',
-                'Authorization': `Bearer ${RENTMAN_API_TOKEN}`,
-            },
-        });
-
-        const text = await response.text();
-
-        if (!response.ok) {
-            // Tjek om det er en "not found"-fejl
-            if (text.includes('not found') || response.status === 404) {
-                return false;
-            }
-            throw new Error(`HTTP error! status: ${response.status}, message: ${text}`);
+    const response = await fetch(url, {
+        method: 'DELETE',
+        headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${RENTMAN_API_TOKEN}`,
         }
+    });
 
-        // Prøv at parse JSON
-        try {
-            return JSON.parse(text);
-        } catch {
-            return text;
+    if (!response.ok) {
+        // Tjek om det er en "not found"-fejl
+        if (text.includes('not found') || response.status === 404) {
+            return false;
         }
-
-    } catch (err) {
-        console.error("Fejl ved check af RentalRequest:", err);
-        throw err;
+        throw new Error(`HTTP error! status: ${response.status}, message: ${text}`);
     }
+
+    const output = await response.json();
+    console.log(output)
+    return output
 }
+
+
+
 
 
 // STATUS FRA I GÅR! DEN LOGGEDE IKKE NOGEN DEAL. TJEK EVT. ALLE BERAK; PUNKTER.
@@ -204,15 +201,30 @@ router.post("/", async (req, res) => {
 
         } else if (event.subscriptionType === "object.propertyChange") {
             console.log("Det er change")
+
+
             if (event.objectTypeId === "0-3") {
-                console.log("Det er deal")
-                const deal = await hubspotGetFromEndpoint(event.objectTypeId, event.objectId);
-                if (deal.properties.usage_period && deal.properties.slut_projekt_period) {
-                    console.log("Har en projektperiode!")
-                } else {
-                    console.log("Mangler projektperiode!")
+                if (event.propertyName === "slut_projekt_period") {
+
+                }
+
+
+            }
+
+
+        } else if (event.subscriptionType === "object.deletion") {
+            console.log("Det er delete")
+
+            if (event.objectTypeId === "0-3") {
+                let [request] = await pool.execute('SELECT * FROM synced_request WHERE hubspot_id = ?', [event.objectId])
+                if (request[0].rentman_request_id) {
+                    await rentmanDelRentalRequest(request[0].rentman_request_id);
+                    console.log("Rental request slettet")
+                } else{
+                    console.log("Kunne ikke finde rental request i Rentman")
                 }
             }
+
         }
     };
 
