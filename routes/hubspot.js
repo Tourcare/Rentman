@@ -143,67 +143,27 @@ router.post("/", async (req, res) => {
             if (event.objectTypeId === "0-3") { // DEAL OPRETTET
                 const deal = await hubspotGetFromEndpoint(event.objectTypeId, event.objectId);
                 console.log("Oprettelse af deal modtaget!")
-                if (!deal.properties.name) { break; }
-                console.log(`Deal har navn: ${deal.properties.name}`)
+
+                console.log(`Deal har navn: ${deal.properties.dealname}`)
 
                 if (deal.properties.usage_period && deal.properties.slut_projekt_period) {
-                    console.log(`${deal.properties.name} har en projektperiode`)
+                    console.log(`${deal.properties.dealname} har en projektperiode`)
                     if (deal.associations.companies) {
-                        console.log(`${deal.properties.name} har tilknyttet virksomhed`)
+                        console.log(`${deal.properties.dealname} har tilknyttet virksomhed`)
 
                         const results = deal.associations.companies.results
                         for (const result of results) {
                             if (result.type === "deal_to_company") {
 
-                                console.log(`Tjekker om ${deal.properties.name} findes i rentman`)
-
-                                let rentman;
-                                let checkRentman = false;
-
                                 if (whatHappend) { break; }
 
-                                const [request] = await pool.execute('SELECT * FROM synced_request WHERE hubspot_deal_id  = ?', [event.objectId])
-                                const [company] = await pool.execute('SELECT * FROM synced_companies WHERE hubspot_id = ?', [result.id])
+                                let rentman;
+                                rentman = await rentmanPostRentalRequest(deal, company[0].rentman_id)
 
-                                if (request[0]) { checkRentman = await rentmanCheckRentalRequest(request[0].rentman_request_id) };
-
-
-                                if (request.length === 0 && !checkRentman) { // Findes slet ikke
-                                    console.log(`    + ${deal.properties.name} findes slet ikke!`)
-
-                                    rentman = await rentmanPostRentalRequest(deal, company[0].rentman_id)
-
-                                    await pool.query(
-                                        'INSERT INTO synced_request (rentman_request_id, hubspot_deal_id, synced_companies_id) VALUES (?, ?, ?)',
-                                        [rentman.data.id, event.objectId, company[0].id]
-                                    );
-                                    whatHappend = true
-                                    break;
-
-
-
-                                } else { //Findes et sted
-
-
-                                    console.log(`    + ${deal.properties.name} findes ikke i rentman!`)
-
-                                    rentman = await rentmanPostRentalRequest(deal, company[0].rentman_id)
-
-                                    if (request[0].id) {
-                                        await pool.query(
-                                            'DELETE FROM synced_request WHERE id = ?',
-                                            [request[0].id]
-                                        );
-                                    }
-
-                                    await pool.query(
-                                        'INSERT INTO synced_request (rentman_request_id, hubspot_deal_id, synced_companies_id) VALUES (?, ?, ?)',
-                                        [rentman.data.id, event.objectId, company[0].id]
-                                    );
-
-                                    whatHappend = true
-                                    break;
-                                }
+                                await pool.query(
+                                    'INSERT INTO synced_request (rentman_request_id, hubspot_deal_id, synced_companies_id) VALUES (?, ?, ?)',
+                                    [rentman.data.id, event.objectId, company[0].id]
+                                );
 
                             }
                         }
@@ -211,47 +171,12 @@ router.post("/", async (req, res) => {
 
                     if (!whatHappend) {
                         let rentman;
-                        let checkRentman = false;
+                        rentman = await rentmanPostRentalRequest(deal)
 
-                        const [request] = await pool.execute('SELECT * FROM synced_request WHERE hubspot_deal_id  = ?', [event.objectId])
-
-                        if (request[0]) { checkRentman = await rentmanCheckRentalRequest(request[0].rentman_request_id) };
-
-                        if (request.length === 0 && !checkRentman) { // Findes slet ikke
-
-                            rentman = await rentmanPostRentalRequest(deal)
-
-                            await pool.query(
-                                'INSERT INTO synced_request (rentman_request_id, hubspot_deal_id) VALUES (?, ?)',
-                                [rentman.data.id, event.objectId]
-                            );
-                            whatHappend = true
-                            break;
-
-
-
-                        } else { //Findes et sted
-
-
-                            console.log(`    + ${deal.properties.name} findes ikke i rentman!`)
-
-                            rentman = await rentmanPostRentalRequest(deal)
-
-                            if (request[0].id) {
-                                await pool.query(
-                                    'DELETE FROM synced_request WHERE id = ?',
-                                    [request[0].id]
-                                );
-                            }
-
-                            await pool.query(
-                                'INSERT INTO synced_request (rentman_request_id, hubspot_deal_id) VALUES (?, ?)',
-                                [rentman.data.id, event.objectId]
-                            );
-
-                            whatHappend = true
-                            break;
-                        }
+                        await pool.query(
+                            'INSERT INTO synced_request (rentman_request_id, hubspot_deal_id) VALUES (?, ?)',
+                            [rentman.data.id, event.objectId]
+                        );
                     }
                 }
 
