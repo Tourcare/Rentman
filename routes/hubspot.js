@@ -171,8 +171,11 @@ router.post("/", async (req, res) => {
                                     [rentman.data.id, event.objectId, company[0].id]
                                 );
 
+                                whatHappend = true;
+                                break;
                             }
                         }
+
                     }
 
                     if (!whatHappend) {
@@ -183,9 +186,16 @@ router.post("/", async (req, res) => {
                             'INSERT INTO synced_request (rentman_request_id, hubspot_deal_id) VALUES (?, ?)',
                             [rentman.data.id, event.objectId]
                         );
-                    }
-                }
+                        whatHappend = true;
+                        break;
 
+                    } else {
+                        break;
+                    }
+
+                } else {
+                    break;
+                }
 
             } else {
                 break;
