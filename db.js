@@ -12,4 +12,7 @@ const dbConfig = {
 
 const pool = mysql.createPool(dbConfig);
 
+const router = express.Router();
+router.use(express.json());
+
 module.exports = pool;

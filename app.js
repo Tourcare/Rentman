@@ -14,7 +14,9 @@ app.post("/", async (req, res) => {
 });
 
 const hubspotRouter = require('./webhooks/routes/hubspot')
+const seamRouter = require('./webhooks/routes/seam')
 
 app.use('/hubspot', hubspotRouter)
+app.use('/seam', seamRouter)
 
 app.listen(8080, () => console.log("Webhook API kører på port 8080"));
