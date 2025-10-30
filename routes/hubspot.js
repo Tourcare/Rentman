@@ -129,27 +129,34 @@ async function rentmanCheckRentalRequest(id) {
 }
 
 
+// STATUS FRA I GÅR! DEN LOGGEDE IKKE NOGEN DEAL. TJEK EVT. ALLE BERAK; PUNKTER.
+
 router.post("/", async (req, res) => {
     const events = req.body;
-    let whatHappend
+    let whatHappend = false;
+    console.log(events)
+    console.log("Hubspot webhook modtaget!")
     for (const event of events) {
 
-
         if (event.subscriptionType === "object.creation") {
-
-
-            if (event.objectTypeId === "0-3") { // DEAL OPRETTET)
+            console.log("Oprettelse modtaget")
+            if (event.objectTypeId === "0-3") { // DEAL OPRETTET
                 const deal = await hubspotGetFromEndpoint(event.objectTypeId, event.objectId);
-
+                console.log("Oprettelse af deal modtaget!")
                 if (!deal.properties.name) { break; }
+                console.log(`Deal har navn: ${deal.properties.name}`)
 
                 if (deal.properties.usage_period && deal.properties.slut_projekt_period) {
+                    console.log(`${deal.properties.name} har en projektperiode`)
                     if (deal.associations.companies) {
+                        console.log(`${deal.properties.name} har tilknyttet virksomhed`)
+
                         const results = deal.associations.companies.results
                         for (const result of results) {
                             if (result.type === "deal_to_company") {
 
-                                console.log(`Tjekker om ${deal.properties.name} findes`)
+                                console.log(`Tjekker om ${deal.properties.name} findes i rentman`)
+
                                 let rentman;
                                 let checkRentman = false;
 
