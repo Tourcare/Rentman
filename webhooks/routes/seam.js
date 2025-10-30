@@ -20,6 +20,7 @@ router.post("/", async (req, res) => {
     res.status(200).send("OK");
     console.log(events)
     await seam.acs.credentials.get({
+        cs_system_id: acsSystemId,
         acs_credential_id: events.data.connected_account_id,
     });
 });
