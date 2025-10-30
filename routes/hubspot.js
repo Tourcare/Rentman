@@ -39,13 +39,19 @@ async function hubspotGetFromEndpoint(type, id) {
         }
     });
 
+    const text = await response.text();
+
     if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`HTTP error! status: ${response.status}, message: ${errText}`);
+        if (text.includes('not found') || response.status === 404) {
+            return false;
+        }
+        console.log(`HTTP error! status: ${response.status}, message: ${text}`);
+        return false;
     }
 
-    const output = await response.json();
-    return output
+    const output = JSON.parse(text);
+    console.log(output);
+    return output;
 }
 
 
@@ -89,7 +95,8 @@ async function rentmanPostRentalRequest(data, contact) {
         if (text.includes('not found') || response.status === 404) {
             return false;
         }
-        throw new Error(`HTTP error! status: ${response.status}, message: ${text}`);
+        console.log(`HTTP error! status: ${response.status}, message: ${text}`);
+        return false;
     }
 
     const output = JSON.parse(text);
@@ -116,7 +123,7 @@ async function rentmanDelRentalRequest(id) {
         if (text.includes('not found') || response.status === 404) {
             return false;
         }
-        throw new Error(`HTTP error! status: ${response.status}, message: ${text}`);
+        console.log(`HTTP error! status: ${response.status}, message: ${text}`);
     }
 
     const output = JSON.parse(text);
@@ -165,6 +172,8 @@ router.post("/", async (req, res) => {
 
                                 let rentman;
                                 rentman = await rentmanPostRentalRequest(deal, company[0].rentman_id)
+
+                                if (!rentman) {break;}
 
                                 await pool.query(
                                     'INSERT INTO synced_request (rentman_request_id, hubspot_deal_id, synced_companies_id) VALUES (?, ?, ?)',
