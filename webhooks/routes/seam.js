@@ -9,7 +9,7 @@ const pool = require('../../db');
 const router = express.Router();
 router.use(express.json());
 
-import { Seam } from "seam";
+const { Seam } = require('seam');
 
 const seam = new Seam({ apiKey: process.env.SEAM_API });
 const acsSystemId = process.env.SEAM_ACS_SYSTEM_ID;
