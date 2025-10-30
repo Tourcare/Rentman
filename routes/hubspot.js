@@ -160,8 +160,7 @@ router.post("/", async (req, res) => {
                                 let [company] = await pool.execute('SELECT * FROM synced_companies WHERE hubspot_id = ?', [result.id])
 
                                 if (!company[0]) {
-                                    const mangler = "Mangler Virksomhed"
-                                    [company] = await pool.execute('SELECT * FROM synced_companies WHERE name = ?', [mangler])
+                                    [company] = await pool.execute('SELECT * FROM synced_companies WHERE name = ?', ["Mangler Virksomhed"])
                                 }
 
                                 let rentman;
