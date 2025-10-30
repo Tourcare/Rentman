@@ -83,6 +83,8 @@ async function rentmanPostRentalRequest(data, contact) {
         body: JSON.stringify(body),
     });
 
+    const text = await response.text(); // Make sure to await
+    
     if (!response.ok) {
         // Tjek om det er en "not found"-fejl
         if (text.includes('not found') || response.status === 404) {
@@ -220,7 +222,7 @@ router.post("/", async (req, res) => {
                 if (request[0].rentman_request_id) {
                     await rentmanDelRentalRequest(request[0].rentman_request_id);
                     console.log("Rental request slettet")
-                } else{
+                } else {
                     console.log("Kunne ikke finde rental request i Rentman")
                 }
             }
