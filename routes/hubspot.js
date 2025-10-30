@@ -173,7 +173,7 @@ router.post("/", async (req, res) => {
                                 let rentman;
                                 rentman = await rentmanPostRentalRequest(deal, company[0].rentman_id)
 
-                                if (!rentman) {break;}
+                                if (!rentman) { break; }
 
                                 await pool.query(
                                     'INSERT INTO synced_request (rentman_request_id, hubspot_deal_id, synced_companies_id) VALUES (?, ?, ?)',
@@ -228,17 +228,21 @@ router.post("/", async (req, res) => {
             console.log("Det er delete")
 
             if (event.objectTypeId === "0-3") {
+                let request;
                 try {
-                    let [request] = await pool.execute('SELECT * FROM synced_request WHERE hubspot_id = ?', [event.objectId])
+                    [request] = await pool.execute(
+                        'SELECT * FROM synced_request WHERE hubspot_deal_id = ?',
+                        [event.objectId]
+                    );
                 } catch (err) {
-                    console.log(err)
+                    console.log(err);
                 }
-                
-                if (request[0].rentman_request_id) {
+
+                if (request?.[0]?.rentman_request_id) {
                     await rentmanDelRentalRequest(request[0].rentman_request_id);
-                    console.log("Rental request slettet")
+                    console.log("Rental request slettet");
                 } else {
-                    console.log("Kunne ikke finde rental request i Rentman")
+                    console.log("Kunne ikke finde rental request i Rentman");
                 }
             }
 
