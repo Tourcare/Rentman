@@ -16,15 +16,40 @@ const acsSystemId = process.env.SEAM_ACS_SYSTEM_ID;
 const accessGroupId = process.env.SEAM_ACCESS_GROUP;
 
 router.post("/", async (req, res) => {
-    const events = req.body;
+    const event = req.body;
     res.status(200).send("OK");
-    console.log(events)
-    console.log(events.data.connected_account_id)
-    const user = await seam.acs.users.get({
-        user_identity_id: events.data.connected_account_id,
-        acs_system_id: acsSystemId,
-    });
-    console.log(user)
+    console.log(event)
+    if (event.event_type === "lock.unlocked") {
+        const connectedAccountId = event.connected_account_id || event.data?.connected_account_id;
+        const deviceId = event.device_id || event.data?.device_id;
+        const method = event.method || event.data?.method;
+        let connectedAccount = null;
+        if (connectedAccountId) {
+            connectedAccount = await seam.connectedAccounts.get({
+                connected_account_id: connectedAccountId,
+            });
+            console.log("Connected account:", connectedAccount);
+        }
+
+        // 2) Hent device/lås info
+        let device = null;
+        if (deviceId) {
+            device = await seam.devices.get({ device_id: deviceId });
+            console.log("Device info:", device);
+        }
+
+        let who = null;
+        if (connectedAccount?.user_identifier) {
+            who = connectedAccount.user_identifier;
+        } else if (connectedAccount?.custom_metadata && connectedAccount.custom_metadata.internalUserId) {
+            who = { internalId: connectedAccount.custom_metadata.internalUserId };
+        } else {
+            who = { note: `Unknown via Seam. method=${method}` };
+        }
+
+        console.log("Resolved opener:", who);
+    }
+
 });
 
 
