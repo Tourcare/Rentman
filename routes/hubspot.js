@@ -84,7 +84,7 @@ async function rentmanPostRentalRequest(data, contact) {
     });
 
     const text = await response.text(); // Make sure to await
-    
+
     if (!response.ok) {
         // Tjek om det er en "not found"-fejl
         if (text.includes('not found') || response.status === 404) {
@@ -99,7 +99,7 @@ async function rentmanPostRentalRequest(data, contact) {
 }
 
 
-async function rentmanPostRentalRequest(id) {
+async function rentmanDelRentalRequest(id) {
     const url = `${RENTMAN_API_BASE}/projectrequests/${id}`;
 
     const response = await fetch(url, {
@@ -110,7 +110,7 @@ async function rentmanPostRentalRequest(id) {
             'Authorization': `Bearer ${RENTMAN_API_TOKEN}`,
         }
     });
-
+    const text = await response.text(); // Make sure to await
     if (!response.ok) {
         // Tjek om det er en "not found"-fejl
         if (text.includes('not found') || response.status === 404) {
