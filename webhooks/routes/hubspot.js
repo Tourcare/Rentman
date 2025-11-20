@@ -65,9 +65,10 @@ function filterWebhooks(events) {
 
 router.post("/", async (req, res) => {
     const events = req.body;
-
+    //console.log(events);
+    
     res.status(200).send("OK");
-    if (events[0].changeSource === "INTEGRATION") {
+    if (events[0].changeSource === "INTEGRATION" || events[0].changeSource === "API") {
         console.log('Kald fra integration. Stopper ved roden')
         return;
     }
@@ -90,7 +91,6 @@ router.post("/", async (req, res) => {
             await handleHubSpotContactWebhook(filtered);
         }
     }
-
 });
 
 module.exports = router;

@@ -107,8 +107,7 @@ async function hubspotPatchOrder(order, current) {
             hs_pipeline_stage: dealstage,
             start_projekt_period: order.usageperiod_end,
             slut_projekt_period: order.usageperiod_start
-        },
-        associations: []
+        }
     };
 
     const response = await fetch(url, {
@@ -293,24 +292,27 @@ async function createOrders(webhook) {
                 break;
             }
 
-            const [rows] = await pool.execute(
+            [dealInfo] = await pool.execute(
                 `SELECT * FROM synced_deals WHERE rentman_project_id = ?`,
                 [projectInfo.id]
             );
-            dealInfo = rows;
 
             if (dealInfo?.[0]) break;
 
             console.log(`Ingen deal endnu for project ${projectInfo.id}. Venter og prøver igen...`);
-            await new Promise(r => setTimeout(r, 3000)); // vent 3 sek
+            await new Promise(r => setTimeout(r, 5000)); // vent 3 sek
         }
+        if (dealInfo?.[0]) {
+           
+            const order_id = await hubspotCreateOrder(subProjectInfo, dealInfo[0].hubspot_project_id, companyRows?.[0]?.hubspot_id ?? 0, contactRows?.[0]?.hubspot_id ?? 0)
 
-        const order_id = await hubspotCreateOrder(subProjectInfo, dealInfo[0].hubspot_project_id, companyRows?.[0]?.hubspot_id ?? 0, contactRows?.[0]?.hubspot_id ?? 0)
-
-        await pool.query(
-            'INSERT INTO synced_order (subproject_name, rentman_subproject_id, hubspot_order_id, synced_companies_id, synced_contact_id, synced_deals_id) VALUES (?, ?, ?, ?, ?, ?)',
-            [subProjectInfo.displayname, subProjectInfo.id, order_id, companyRows?.[0]?.id ?? 0, contactRows?.[0]?.id ?? 0, dealInfo[0].id]
-        );
+            await pool.query(
+                'INSERT INTO synced_order (subproject_name, rentman_subproject_id, hubspot_order_id, synced_companies_id, synced_contact_id, synced_deals_id) VALUES (?, ?, ?, ?, ?, ?)',
+                [subProjectInfo.displayname, subProjectInfo.id, order_id, companyRows?.[0]?.id ?? 0, contactRows?.[0]?.id ?? 0, dealInfo[0].id]
+            );
+        } else console.log(`STOPPER Fandt ingen deal for project ${projectInfo.navn}`);
+        
+        
 
     }
 }

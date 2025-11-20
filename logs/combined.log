@@ -1,0 +1,17 @@
+{"environment":"production","level":"info","message":"Webhook API kører på port 8080","service":"RentmanIntegrationWatch","timestamp":"2025-11-19T10:10:23.265Z"}
+{"environment":"production","level":"info","message":"Webhook API kører på port 8080","service":"RentmanIntegrationWatch","timestamp":"2025-11-19T10:13:01.838Z"}
+{"environment":"production","level":"info","message":"Info message","service":"RentmanIntegrationWatch","timestamp":"2025-11-19T10:13:01.843Z"}
+{"environment":"production","level":"warn","message":"Warning message","service":"RentmanIntegrationWatch","timestamp":"2025-11-19T10:13:01.845Z"}
+{"environment":"production","level":"error","message":"Error message","service":"RentmanIntegrationWatch","timestamp":"2025-11-19T10:13:01.846Z"}
+{"environment":"production","level":"info","message":"Webhook API kører på port 8080","service":"RentmanIntegrationWatch","timestamp":"2025-11-19T10:18:46.968Z"}
+{"environment":"production","level":"info","message":"Info message","service":"RentmanIntegrationWatch","timestamp":"2025-11-19T10:18:46.971Z"}
+{"environment":"production","level":"warn","message":"Warning message","service":"RentmanIntegrationWatch","timestamp":"2025-11-19T10:18:46.973Z"}
+{"environment":"production","level":"error","message":"Error message","service":"RentmanIntegrationWatch","timestamp":"2025-11-19T10:18:46.974Z"}
+{"environment":"production","level":"info","message":"Webhook API kører på port 8080","service":"RentmanIntegrationWatch","timestamp":"2025-11-19T10:35:48.127Z"}
+{"environment":"production","level":"info","message":"Info message","service":"RentmanIntegrationWatch","timestamp":"2025-11-19T10:35:48.130Z"}
+{"environment":"production","level":"warn","message":"Warning message","service":"RentmanIntegrationWatch","timestamp":"2025-11-19T10:35:48.131Z"}
+{"environment":"production","level":"error","message":"Error message","service":"RentmanIntegrationWatch","timestamp":"2025-11-19T10:35:48.131Z"}
+{"environment":"production","level":"info","message":"App starter","service":"RentmanIntegrationWatch","timestamp":"2025-11-19T10:37:38.452Z"}
+{"environment":"production","level":"error","message":"Noget gik galt!","service":"RentmanIntegrationWatch","timestamp":"2025-11-19T10:37:38.455Z"}
+{"environment":"production","level":"info","message":"App starter","service":"RentmanIntegrationWatch","timestamp":"2025-11-19T10:48:39.068Z"}
+{"environment":"production","level":"error","message":"Noget gik galt!","service":"RentmanIntegrationWatch","timestamp":"2025-11-19T10:48:39.071Z"}

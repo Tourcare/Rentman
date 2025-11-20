@@ -345,8 +345,8 @@ async function createContact(webhook) {
         if (personId) {
             // Indsæt i DB
             await pool.query(
-                'INSERT INTO synced_contacts (name, rentman_id, hubspot_id) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE name=VALUES(name), hubspot_id=VALUES(hubspot_id)',
-                [personData.displayname, personData.id, personId]
+                'INSERT INTO synced_contacts (name, rentman_id, hubspot_id, hubspot_company_conntected) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE name=VALUES(name), hubspot_id=VALUES(hubspot_id)',
+                [personData.displayname, personData.id, personId, companyId]
             );
 
             console.log(`Kontaktperson oprettet med HubSpot ID: ${personId}`);
@@ -446,29 +446,34 @@ async function deleteContact(webhook) {
     } else if (itemType === 'ContactPerson') {
 
         for (item of items) {
-            // Find HubSpot ID for kontaktpersonen
 
-            const [contactRows] = await pool.execute('SELECT hubspot_id FROM synced_contacts WHERE rentman_id = ?', [item]);
-            if (!contactRows[0]) {
-                console.warn(`Ingen kontaktperson fundet i DB for rentman_id ${item}`);
-                return;
-            }
-            const personId = contactRows[0].hubspot_id;
+            let contactRows;
+            let contactId;
+            let companyId
 
-            // Find tilknyttet virksomhed (parent)
-            const parentId = item.parent?.id;
-            if (parentId) {
-                const [companyRows] = await pool.execute('SELECT hubspot_id FROM synced_companies WHERE rentman_id = ?', [parentId]);
-                if (companyRows[0]) {
-                    const companyId = companyRows[0].hubspot_id;
-                    // Fjern association
-                    console.log(`Fjerner association mellem kontaktperson ${personId} og virksomhed ${companyId}`);
-                    await hubspotDeleteContactAssociation(personId, companyId);
+            for (let i = 0; i < 3; i++) {
+                [contactRows] = await pool.execute('SELECT * FROM synced_contacts WHERE rentman_id = ?', [item]);
+                if (contactRows[0]) {
+                    contactId = contactRows[0].hubspot_id;
+                    companyId = contactRows[0].hubspot_company_conntected
+                    break;
                 }
+                console.log(`Kontaktperson ikke fundet endnu for rentman_id ${item}. Venter og prøver igen...`);
+                await new Promise(r => setTimeout(r, 5000)); // Vent 3 sek
             }
 
-            // Slet ikke kontaktpersonen, kun fra DB
-            await pool.query('DELETE FROM synced_contacts WHERE rentman_id = ?', [item]);
+            if (companyId) {
+
+                console.log(`Fjerner association mellem kontaktperson ${contactId} og virksomhed ${companyId}`);
+                await hubspotDeleteContactAssociation(contactId, companyId);
+                await pool.query('DELETE FROM synced_contacts WHERE rentman_id = ?', [item]);
+
+            } else {
+                console.log('Kunne ikke finde virksomhed. Slet kontaktperson manuelt i HubSpot.');
+
+            }
+
+
         }
 
 

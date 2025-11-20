@@ -25,6 +25,11 @@ async function hubspotGetFromEndpoint(type, id, query) {
         }
     });
 
+    if (response.status === 404) {
+        console.warn(`Objekt ikke fundet i HubSpot: ${type}/${id}`);
+        return false;
+    }
+
     if (!response.ok) {
         const errText = await response.text();
         console.error(`Fejl ved hentning fra HubSpot: ${response.status}, ${errText}`);
@@ -247,6 +252,7 @@ async function handleHubSpotContactWebhook(events) {
     try {
 
         for (const event of events) {
+            if (event.changeSource === "OBJECT_MERGE") break; 
             if (event.objectId) { // Alle ikke associations
 
 
@@ -285,8 +291,8 @@ async function handleHubSpotContactWebhook(events) {
                         const rentmanId = await rentmanCreateContactPerson(contact, rentmanCompany)
                         const name = `${contact.properties.firstname || ""} ${contact.properties.lastname || ""}`
                         await pool.query(
-                            'INSERT INTO synced_contacts (name, rentman_id, hubspot_id) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE name=VALUES(name), hubspot_id=VALUES(hubspot_id)',
-                            [name, rentmanId.id, contact.id]
+                            'INSERT INTO synced_contacts (name, rentman_id, hubspot_id, hubspot_company_conntected) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE name=VALUES(name), hubspot_id=VALUES(hubspot_id)',
+                            [name, rentmanId.id, contact.id, dbCompany[0].hubspot_id]
                         );
 
                         console.log('Oprettede contactperson til virksomhed med id: ' + rentmanCompany);
@@ -376,6 +382,9 @@ async function handleHubSpotContactWebhook(events) {
                         contact = await hubspotGetFromEndpoint("0-1", event.toObjectId, "?associations=companies")
                     }
                     const name = `${contact.properties.firstname || ""} ${contact.properties.lastname || ""}`
+
+                    if (!company) break;
+                    if (!contact) break;
                     // FINDER COMPANY I DB
                     for (let i = 0; i < 3; i++) {
                         [dbCompany] = await pool.query('SELECT * FROM synced_companies WHERE hubspot_id = ?', [company.id])
@@ -416,8 +425,8 @@ async function handleHubSpotContactWebhook(events) {
                     } else {
                         const rentmanId = await rentmanCreateContactPerson(contact, rentmanCompany)
                         await pool.query(
-                            'INSERT INTO synced_contacts (name, rentman_id, hubspot_id) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE name=VALUES(name), hubspot_id=VALUES(hubspot_id)',
-                            [name, rentmanId.id, contact.id]
+                            'INSERT INTO synced_contacts (name, rentman_id, hubspot_id, hubspot_company_conntected) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE name=VALUES(name), hubspot_id=VALUES(hubspot_id)',
+                            [name, rentmanId.id, contact.id, dbCompany?.[0]?.hubspot_id]
                         );
                         console.log(`Oprettede kontaktperson ${name}`);
                         

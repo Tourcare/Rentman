@@ -9,6 +9,13 @@ const HUBSPOT_ENDPOINT_v4 = "https://api.hubapi.com/crm/v4/objects/"
 const RENTMAN_API_BASE = "https://api.rentman.net";
 const RENTMAN_API_TOKEN = process.env.RENTMAN_ACCESS_TOKEN;
 
+let userFromSql
+async function loadSqlUsers() {
+    [userFromSql] = await pool.execute(`SELECT * FROM synced_users`)
+}
+
+loadSqlUsers();
+
 function sanitizeNumber(value, decimals = 2) {
     const EPSILON = 1e-6;
 
@@ -73,12 +80,6 @@ async function hubspotCreateDeal(deal, company, contact) {
     const usageStart = new Date(deal.usageperiod_start);
     const usageEnd = new Date(deal.usageperiod_start);
     const todayDate = new Date(); // dags dato
-
-    if (usageStart < todayDate) {
-        dealstage = "presentationscheduled";
-    } else {
-        dealstage = "appointmentscheduled";
-    }
 
     const body = {
         properties: {
@@ -353,12 +354,25 @@ async function hubspotUpdateDeal(id, deal) {
         properties: {
             dealname: deal.displayname,
             dealstage,
-
             usage_period: usageStart,
             slut_projekt_period: usageEnd,
             amount: total_price
         }
     };
+
+    if (deal.account_manager) {
+        const crewSplit = deal.account_manager.split("/").pop();
+        const crewId = Number(crewSplit);
+
+        accountManager = userFromSql.find(
+            row => row.rentman_id.toString() === crewId.toString()
+        );
+
+        if (accountManager) {
+            body.properties.hubspot_owner_id = accountManager.hubspot_id;
+            console.log(`IGANG | Tilføjet ${accountManager.navn} til deal ${deal.displayname}`);
+        }
+    }
 
     const response = await fetch(url, {
         method: "PATCH",
@@ -410,11 +424,12 @@ async function updateDeal(webhook) {
     console.log(`Fandt HubSpot ID for ${webhook.items[0].id} - HubSpot ID: ${hubspotDeal.hubspot_project_id}`);
 
     // Tjek om customer eller cust_contact er opdateret
-    const [oldCompany] = await pool.execute(`SELECT rentman_id FROM synced_companies WHERE id = ?`, [hubspotDeal.synced_companies_id]);
-    const [oldContact] = await pool.execute(`SELECT rentman_id FROM synced_contacts WHERE id = ?`, [hubspotDeal.synced_contact_id]);
-    const isCustomerUpdated = oldCompany[0]?.rentman_id !== project.customer;
-    const isContactUpdated = oldContact[0]?.rentman_id !== project.cust_contact;
+    const [oldCompany] = await pool.execute(`SELECT * FROM synced_companies WHERE id = ?`, [hubspotDeal.synced_companies_id]);
+    const [oldContact] = await pool.execute(`SELECT * FROM synced_contacts WHERE id = ?`, [hubspotDeal.synced_contact_id]);
+    const isCustomerUpdated = oldCompany[0]?.rentman_id == contactInfo?.id;
+    const isContactUpdated = oldContact[0]?.rentman_id == customerInfo?.id;
     const associationsUpdated = isCustomerUpdated || isContactUpdated;
+    
 
     // Hjælpefunktion til at opdatere associationer
     const updateAssociations = async (objectType, objectId, syncedCompanyId, syncedContactId, companyAssocId, contactAssocId) => {
@@ -440,7 +455,7 @@ async function updateDeal(webhook) {
     };
 
     // Opdater deal associationer kun hvis opdateret
-    if (associationsUpdated) {
+    if (!associationsUpdated) {
         await updateAssociations("deals", hubspotDeal.hubspot_project_id, hubspotDeal.synced_companies_id, hubspotDeal.synced_contact_id, 5, 3);
 
         // Opdater subprojekter (orders)
