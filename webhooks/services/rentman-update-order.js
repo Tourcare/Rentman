@@ -218,8 +218,8 @@ async function hubspotPatchOrder(order, current) {
             hs_total_price: total_price,
             hs_pipeline: "14a2e10e-5471-408a-906e-c51f3b04369e",
             hs_pipeline_stage: dealstage,
-            start_projekt_period: order.usageperiod_end,
-            slut_projekt_period: order.usageperiod_start,
+            start_projekt_period: order.usageperiod_start,
+            slut_projekt_period: order.usageperiod_end,
             slut_planning_period: order.planperiod_end,
             start_planning_period: order.planperiod_start,
             rabat: rabat,
@@ -292,6 +292,7 @@ async function updateOrders(webhook) {
         WHERE rentman_subproject_id = ?;`, [webhook.items?.[0].id]);
     console.log(`Main projekt: ${hubspotProjectId?.[0].hubspot_project_id}`)
     await updateHubSpotDealStatus(hubspotProjectId?.[0].hubspot_project_id)
+    await updateHubSpotDealFinancial(hubspotProjectId?.[0].hubspot_project_id)
 }
 
 
@@ -333,8 +334,8 @@ async function hubspotCreateOrder(order, deal, company, contact) {
             hs_total_price: total_price,
             hs_pipeline: "14a2e10e-5471-408a-906e-c51f3b04369e",
             hs_pipeline_stage: dealstage,
-            start_projekt_period: order.usageperiod_end,
-            slut_projekt_period: order.usageperiod_start,
+            start_projekt_period: order.usageperiod_start,
+            slut_projekt_period: order.usageperiod_end,
             slut_planning_period: order.planperiod_end,
             start_planning_period: order.planperiod_start,
             rabat: rabat,
@@ -456,5 +457,29 @@ async function createOrders(webhook) {
     }
 }
 
+async function hubspotDeleteOrder(order) {
+    const url = `${HUBSPOT_ENDPOINT}0-123/${order}`
+    await fetch(url, {
+        method: "DELETE",
+        headers: {
+            'Content-Type': 'application/json',
+            "Accept": "application/json",
+            "Authorization": `Bearer ${HUBSPOT_TOKEN}`
+        }
+    });
+}
 
-module.exports = { createOrders, updateOrders };
+async function deleteOrder(event) {
+    console.log(`Starter sletning af ${event.items.length} orders`);
+    const subprojects = event.items
+    for (const sub of subprojects) {
+        const [sqlSynced] = await pool.query(`SELECT * FROM synced_order WHERE rentman_subproject_id = ?`, [sub])
+        if (sqlSynced) {
+            await hubspotDeleteOrder(sqlSynced?.[0]?.hubspot_order_id)
+            console.log(`Slettede ${sqlSynced?.[0]?.subproject_name}`);
+        }
+    }
+}
+
+
+module.exports = { createOrders, updateOrders, deleteOrder };

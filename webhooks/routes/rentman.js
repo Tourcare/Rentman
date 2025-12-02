@@ -5,7 +5,7 @@ const dotenv = require('dotenv');
 const pool = require('../../db');
 const { rentmanCrossCheckRental } = require("../services/rentman-request");
 const { syncDeal, updateDeal } = require("../services/rentman-update-deal");
-const { createOrders, updateOrders } = require("../services/rentman-update-order");
+const { createOrders, updateOrders, deleteOrder } = require("../services/rentman-update-order");
 const { createContact, updateContact, deleteContact } = require("../services/rentman-update-contact");
 const { linkFileToDeal } = require("../services/rentman-quotation-files");
 
@@ -30,6 +30,8 @@ router.post("/", async (req, res) => {
 
                 if (!crossCheck) { // Ikke request
                     syncDeal(event)
+                } else {
+                    updateDeal(event)
                 }
 
 
@@ -43,6 +45,9 @@ router.post("/", async (req, res) => {
 
             } if (event.eventType === "update") {
                 updateOrders(event)
+                
+            } if (event.eventType === "delete") {
+                deleteOrder(event)
             }
 
         } if (["Contact", "ContactPerson"].includes(event?.itemType)) {

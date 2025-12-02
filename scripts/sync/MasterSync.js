@@ -268,6 +268,39 @@ async function rentmanGetContacts() {
     return allContacts;
 }
 
+async function rentmanGetContactPersonsList() {
+    const limit = 50;
+    let offset = 0;
+    let allContacts = [];
+
+    while (true) {
+        const url = `${RENTMAN_API_BASE}/contactpersons?limit=${limit}&offset=${offset}`;
+
+        const response = await fetch(url, {
+            headers: {
+                "Accept": "application/json",
+                "Authorization": `Bearer ${RENTMAN_API_TOKEN}`,
+            },
+        });
+
+        if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`HTTP error fra Rentman: ${response.status}, ${errText}`);
+        }
+
+        const output = await response.json();
+
+        if (output.data && output.data.length > 0) {
+            allContacts = allContacts.concat(output.data);
+            offset += limit;
+        } else {
+            break;
+        }
+    }
+
+    return allContacts;
+}
+
 async function rentmanGetContactPersons(id) {
     const url = `${RENTMAN_API_BASE}/contacts/${id}/contactpersons`;
 
@@ -292,8 +325,12 @@ async function rentmanGetContactPersons(id) {
 
 async function syncContactsToCompanies() {
     const rentmanAllContacts = await rentmanGetContacts();
+    const rentmanAllContactPersons = await rentmanGetContactPersonsList();
     const [sqlRentmanID] = await pool.query('SELECT rentman_id FROM synced_companies')
+    const [sqlRentmanIDPerson] = await pool.query('SELECT rentman_id FROM synced_contacts')
+
     let i = 0;
+
     for (const contact of rentmanAllContacts) {
         const sql = sqlRentmanID.find(row => row.rentman_id.toString() === contact.id.toString())
         if (!sql) {
@@ -322,10 +359,32 @@ async function syncContactsToCompanies() {
             console.log(`SUCCESS | Færdig oprettet ${contact.displayname}`);
         }
     }
+
+    let o = 0
+
+    for (const person of rentmanAllContactPersons) {
+        o++
+        const sql = sqlRentmanIDPerson.find(row => row.rentman_id.toString() === person.id.toString())
+        if (!sql) {
+            console.log(`IN PROGESS | Opretter kontaktperson: ${person.displayname} (${o}/${rentmanAllContactPersons.length})`);
+            const companyInfo = await rentmanGetFromEndpoint(person.contact)
+            const [companyId] = await pool.query(`
+                SELECT * FROM synced_companies WHERE rentman_id = ?`, [companyInfo.id])
+
+            const hsPersonId = await hubspotCreateContact(person, companyId?.[0]?.hubspot_id)
+            if (hsPersonId) {
+                await pool.query(
+                    'INSERT INTO synced_contacts (name, rentman_id, hubspot_id, hubspot_company_conntected) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE name=VALUES(name), hubspot_id=VALUES(hubspot_id)',
+                    [person.displayname, person.id, hsPersonId, companyId?.[0]?.hubspot_id]
+                );
+            }
+            console.log(`SUCCESS | Færdig oprettet ${person.displayname}`);
+        }
+    }
     console.log(`---> Opdatering færdig. Fandt ${i} virksomheder <---`);
 }
 
-syncContactsToCompanies();
+//syncContactsToCompanies();
 
 /* ###############################################################
 

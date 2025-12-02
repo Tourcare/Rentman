@@ -147,12 +147,12 @@ async function hubspotCreateNote(deal, file) {
 
 async function linkFileToDeal(event) {
     const fileInfo = await rentmanGetFromEndpoint(event.items[0].ref);
-    const quotation = await rentmanGetFromEndpoint(`/quotes/${fileInfo.file_item}`)
-    const project = await rentmanGetFromEndpoint(quotation.project)
 
     const fileLink = fileInfo.url
 
     if (fileInfo.file_itemtype == "Offerte") {
+        const quotation = await rentmanGetFromEndpoint(`/quotes/${fileInfo.file_item}`)
+        const project = await rentmanGetFromEndpoint(quotation.project)
         let hubspotDeal;
         for (let i = 0; i < 3; i++) {
             const [rows] = await pool.execute(

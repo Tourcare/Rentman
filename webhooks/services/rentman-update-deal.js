@@ -244,7 +244,8 @@ async function syncDeal(webhook) {
             const [contactRows] = await pool.execute(`SELECT * FROM synced_contacts WHERE rentman_id = ?`, [customerInfo.id]);
             console.log(`Opretter deal ${project.displayname} med virksomhed og kontaktperson`);
 
-            deal_id = await hubspotCreateDeal(projectInfo, companyRows[0].hubspot_id, contactRows[0].hubspot_id)
+            deal_id = await hubspotCreateDeal(projectInfo, companyRows?.[0]?.hubspot_id, contactRows?.[0]?.hubspot_id)
+            
             await pool.query(
                 'INSERT INTO synced_deals (project_name, rentman_project_id, hubspot_project_id, synced_companies_id, synced_contact_id) VALUES (?, ?, ?, ?, ?)',
                 [project.displayname, projectInfo.id, deal_id, companyRows[0].id, contactRows[0].id]
@@ -253,7 +254,7 @@ async function syncDeal(webhook) {
         } else {
             console.log(`Opretter deal ${project.displayname} uden kontaktperson`);
 
-            deal_id = await hubspotCreateDeal(projectInfo, companyRows[0].hubspot_id)
+            deal_id = await hubspotCreateDeal(projectInfo, companyRows?.[0]?.hubspot_id)
             await pool.query(
                 'INSERT INTO synced_deals (project_name, rentman_project_id, hubspot_project_id, synced_companies_id) VALUES (?, ?, ?, ?)',
                 [project.displayname, projectInfo.id, deal_id, companyRows[0].id]
