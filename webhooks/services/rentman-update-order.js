@@ -9,6 +9,13 @@ const HUBSPOT_ENDPOINT_v4 = "https://api.hubapi.com/crm/v4/objects/"
 const RENTMAN_API_BASE = "https://api.rentman.net";
 const RENTMAN_API_TOKEN = process.env.RENTMAN_ACCESS_TOKEN;
 
+let userFromSql
+async function loadSqlUsers() {
+    [userFromSql] = await pool.execute(`SELECT * FROM synced_users`)
+}
+
+loadSqlUsers();
+
 function sanitizeNumber(value, decimals = 2) {
     const EPSILON = 1e-6;
 
@@ -69,8 +76,113 @@ async function rentmanGetFromEndpoint(endpoint, attempt = 1) {
 
 // ###############################################################################################################
 
+async function getOrderStatus(order) {
+    const url = `${HUBSPOT_ENDPOINT}0-123/${order.id}?properties=hs_pipeline_stage`
+    const response = await fetch(url, {
+        method: "GET",
+        headers: {
+            'Content-Type': 'application/json',
+            "Accept": "application/json",
+            "Authorization": `Bearer ${HUBSPOT_TOKEN}`,
+        }
+    });
+    const output = await response.json();
+    return output.properties.hs_pipeline_stage
+}
+
+async function hubspotGetDealInfo(order) {
+    const url = `${HUBSPOT_ENDPOINT}0-3/${order}?associations=0-123`
+    const response = await fetch(url, {
+        method: "GET",
+        headers: {
+            'Content-Type': 'application/json',
+            "Accept": "application/json",
+            "Authorization": `Bearer ${HUBSPOT_TOKEN}`,
+        }
+    });
+    const output = await response.json();
+    return output 
+}
+
+const dealStageMap = {
+    "937ea84d-0a4f-4dcf-9028-3f9c2aafbf03": "Afventer Kunde",
+    "3725360f-519b-4b18-a593-494d60a29c9f": "Aflyst",
+    "aa99e8d0-c1d5-4071-b915-d240bbb1aed9": "Bekræftet",
+    "3852081363": "Afsluttet",
+    "4b27b500-f031-4927-9811-68a0b525cbae": "Koncept",
+    "3531598027": "Skal faktureres",
+    "3c85a297-e9ce-400b-b42e-9f16853d69d6": "Faktureret",
+    "3986020540": "Retur"
+};
+
+const setStageMap = {
+    "Koncept": "appointmentscheduled",
+    "Afventer kunde": "qualifiedtobuy",
+    "Aflyst": "decisionmakerboughtin",
+    "Bekræftet": "presentationscheduled",
+    "Afsluttet": "3851496691",
+    "Skal faktureres": "3852552384",
+    "Faktureret": "3852552385",
+    "Retur": "3986019567"
+}
+
+async function updateHubSpotDealStatus(order) {
+    console.log(`Kalder updateHubSpotDealStatus`);
+    
+    const project = await hubspotGetDealInfo(order); 
+
+    const priority = ["Skal faktureres", "Bekræftet", "Faktureret", "Afsluttet", "Koncept", "Aflyst"]
+    const associations = project.associations?.orders?.results
+    let status;
+
+    if (associations) {
+        let totalStatus = [];
+
+        for (const order of associations) {
+            const status = await getOrderStatus(order);
+            const mapped = dealStageMap[status];
+            if (mapped) totalStatus.push(mapped);
+        }
+        const allSame = totalStatus.length > 0 &&
+            totalStatus.every(s => s === totalStatus[0]);
+
+        if (allSame) {
+            status = setStageMap[totalStatus[0]];
+        } else {
+            const status = priority.find(p => totalStatus.includes(p)) || null;
+            status = setStageMap[status];
+
+        }
+    }
+    
+    if (status) {
+        let url = `${HUBSPOT_ENDPOINT}0-3/${order}`
+
+        const body = {
+            properties: {
+                dealstage: status,
+            }
+        };
+
+        const response = await fetch(url, {
+            method: "PATCH",
+            headers: {
+                'Content-Type': 'application/json',
+                "Accept": "application/json",
+                "Authorization": `Bearer ${HUBSPOT_TOKEN}`,
+            },
+            body: JSON.stringify(body),
+        });
+
+        if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`HTTP error! status: ${response.status}, message: ${errText}`);
+        }
+
+    }
 
 
+}
 
 
 async function hubspotPatchOrder(order, current) {
@@ -82,6 +194,7 @@ async function hubspotPatchOrder(order, current) {
     console.log(`     / Opdateret order ${order.displayname}`)
 
     const total_price = sanitizeNumber(order.project_total_price)
+    const rabat = sanitizeNumber(order.discount_subproject)
 
     const dealStageMap = {
         1: "937ea84d-0a4f-4dcf-9028-3f9c2aafbf03",        // Pending
@@ -89,7 +202,7 @@ async function hubspotPatchOrder(order, current) {
         3: "aa99e8d0-c1d5-4071-b915-d240bbb1aed9",        // Confirmed
         4: "aa99e8d0-c1d5-4071-b915-d240bbb1aed9",        // Prepped
         5: "aa99e8d0-c1d5-4071-b915-d240bbb1aed9",        // On Location
-        6: "aa99e8d0-c1d5-4071-b915-d240bbb1aed9",        // On Location (duplicate if needed)
+        6: "3986020540",                                    // Retur
         7: "4b27b500-f031-4927-9811-68a0b525cbae",        // Inquiry
         8: "4b27b500-f031-4927-9811-68a0b525cbae",        // Concept
         9: "3531598027",                                  // To be invoiced
@@ -106,7 +219,15 @@ async function hubspotPatchOrder(order, current) {
             hs_pipeline: "14a2e10e-5471-408a-906e-c51f3b04369e",
             hs_pipeline_stage: dealstage,
             start_projekt_period: order.usageperiod_end,
-            slut_projekt_period: order.usageperiod_start
+            slut_projekt_period: order.usageperiod_start,
+            slut_planning_period: order.planperiod_end,
+            start_planning_period: order.planperiod_start,
+            rabat: rabat,
+            fixed_price: order.fixed_price,
+            rental_price: order.project_rental_price,
+            sale_price: order.project_sale_price,
+            crew_price: order.project_crew_price,
+            transport_price: order.project_transport_price
         }
     };
 
@@ -132,7 +253,7 @@ async function hubspotPatchOrder(order, current) {
 async function updateOrders(webhook) {
     console.log('updateOrders funktion er kaldet!');
     for (const item of webhook.items) {
-        
+
         const subProjectInfo = await rentmanGetFromEndpoint(item.ref)
 
         let orderInfo;
@@ -163,6 +284,14 @@ async function updateOrders(webhook) {
         );
 
     }
+    const [hubspotProjectId] = await pool.execute(`
+        SELECT deals.hubspot_project_id
+        FROM synced_order as od
+        JOIN synced_deals as deals
+        ON od.synced_deals_id = deals.id
+        WHERE rentman_subproject_id = ?;`, [webhook.items?.[0].id]);
+    console.log(`Main projekt: ${hubspotProjectId?.[0].hubspot_project_id}`)
+    await updateHubSpotDealStatus(hubspotProjectId?.[0].hubspot_project_id)
 }
 
 
@@ -180,6 +309,7 @@ async function hubspotCreateOrder(order, deal, company, contact) {
     console.log(`     + Order ${order.displayname}`)
 
     const total_price = sanitizeNumber(order.project_total_price)
+    const rabat = sanitizeNumber(order.discount_subproject)
 
     const dealStageMap = {
         1: "937ea84d-0a4f-4dcf-9028-3f9c2aafbf03",        // Pending
@@ -187,7 +317,7 @@ async function hubspotCreateOrder(order, deal, company, contact) {
         3: "aa99e8d0-c1d5-4071-b915-d240bbb1aed9",        // Confirmed
         4: "aa99e8d0-c1d5-4071-b915-d240bbb1aed9",        // Prepped
         5: "aa99e8d0-c1d5-4071-b915-d240bbb1aed9",        // On Location
-        6: "aa99e8d0-c1d5-4071-b915-d240bbb1aed9",        // On Location (duplicate if needed)
+        6: "3986020540",                                    // Retur
         7: "4b27b500-f031-4927-9811-68a0b525cbae",        // Inquiry
         8: "4b27b500-f031-4927-9811-68a0b525cbae",        // Concept
         9: "3531598027",                                  // To be invoiced
@@ -204,7 +334,15 @@ async function hubspotCreateOrder(order, deal, company, contact) {
             hs_pipeline: "14a2e10e-5471-408a-906e-c51f3b04369e",
             hs_pipeline_stage: dealstage,
             start_projekt_period: order.usageperiod_end,
-            slut_projekt_period: order.usageperiod_start
+            slut_projekt_period: order.usageperiod_start,
+            slut_planning_period: order.planperiod_end,
+            start_planning_period: order.planperiod_start,
+            rabat: rabat,
+            fixed_price: order.fixed_price,
+            rental_price: order.project_rental_price,
+            sale_price: order.project_sale_price,
+            crew_price: order.project_crew_price,
+            transport_price: order.project_transport_price
         },
         associations: []
     };
@@ -303,7 +441,7 @@ async function createOrders(webhook) {
             await new Promise(r => setTimeout(r, 5000)); // vent 3 sek
         }
         if (dealInfo?.[0]) {
-           
+
             const order_id = await hubspotCreateOrder(subProjectInfo, dealInfo[0].hubspot_project_id, companyRows?.[0]?.hubspot_id ?? 0, contactRows?.[0]?.hubspot_id ?? 0)
 
             await pool.query(
@@ -311,8 +449,8 @@ async function createOrders(webhook) {
                 [subProjectInfo.displayname, subProjectInfo.id, order_id, companyRows?.[0]?.id ?? 0, contactRows?.[0]?.id ?? 0, dealInfo[0].id]
             );
         } else console.log(`STOPPER Fandt ingen deal for project ${projectInfo.navn}`);
-        
-        
+
+
 
     }
 }

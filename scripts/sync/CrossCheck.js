@@ -69,7 +69,8 @@ async function rentmanGetFromEndpoint(endpoint, attempt = 1) {
 
         if (!response.ok) {
             const errText = await response.text();
-            throw new Error(`HTTP error! status: ${response.status}, message: ${errText}`);
+            console.error(`HTTP error! status: ${response.status}, message: ${errText}`);
+            return false
         }
 
         const output = await response.json();
@@ -77,7 +78,7 @@ async function rentmanGetFromEndpoint(endpoint, attempt = 1) {
 
     } catch (error) {
         console.error(`Fejl i rentmanGetFromEndpoint for ${endpoint} (forsøg ${attempt}):`, error);
-        throw error;
+        return false
     }
 }
 
@@ -219,7 +220,10 @@ async function hubspotUpdateDeal(id, deal) {
     const total_price = sanitizeNumber(deal.project_total_price)
 
     const usageStart = new Date(deal.usageperiod_start);
-    const usageEnd = new Date(deal.usageperiod_start);
+    const usageEnd = new Date(deal.usageperiod_end);
+    const plannedStart = new Date(deal.planperiod_start);
+    const plannedEnd = new Date(deal.planperiod_end);
+    const createDate = new Date(deal.created)
     const todayDate = new Date(); // dags dato
 
     if (usageStart < todayDate) {
@@ -233,11 +237,13 @@ async function hubspotUpdateDeal(id, deal) {
         properties: {
             dealname: deal.displayname,
             dealstage,
-
+            start_planning_period: plannedStart,
+            slut_planning_period: plannedEnd,
             usage_period: usageStart,
             slut_projekt_period: usageEnd,
             amount: total_price,
-        }
+        },
+        createdAt: createDate,
     };
 
     if (deal.account_manager) {
@@ -265,10 +271,8 @@ async function hubspotUpdateDeal(id, deal) {
     });
 
     if (!response.ok) {
-        if (text.includes('not found') || response.status === 404) {
-            return false;
-        }
-        console.log(`HTTP error! status: ${response.status}, message: ${text}`);
+        const errText = await response.text();
+        console.log(`HTTP error! status: ${response.status}, message: ${errText}`);
         return false;
     }
 
@@ -289,8 +293,10 @@ async function crossCheckDeals() {
     console.log(`STATUS | Rentman projekter hentet fra Rentman og SQL`);
 
     // Hjælpe funktion
-
+    const amount = rentmanAllProjects.length
+    let i = 0
     for (const project of rentmanAllProjects) {
+        i++
         const [projectInfo, rentmanLinkedSubprojects] = await Promise.all([
             rentmanGetFromEndpoint(`/projects/${project.id}`),
             rentmanGetFromEndpoint(`/projects/${project.id}/subprojects`)
@@ -355,7 +361,7 @@ async function crossCheckDeals() {
             }
             
             await hubspotUpdateDeal(checkSqlProject.hubspot_project_id, projectInfo)
-            console.log(`IGANG | Opdaterer information på deal ${project.displayname}`)
+            console.log(`FÆRDIG | Opdateret information på deal ${project.displayname} (${i}/${amount})`)
 
         } else {
             console.log(`FEJL | Fandt ingen SQL record for ${project.displayname}`);
@@ -364,4 +370,90 @@ async function crossCheckDeals() {
     }
 }
 
-crossCheckDeals();
+
+async function hubspotPatchOrder(order, current) {
+
+    const url = `${HUBSPOT_ENDPOINT}orders/${current}`
+
+    const status = await rentmanGetFromEndpoint(order.status)
+
+    const total_price = sanitizeNumber(order.project_total_price)
+    const rabat = sanitizeNumber(order.discount_subproject)
+
+    const dealStageMap = {
+        1: "937ea84d-0a4f-4dcf-9028-3f9c2aafbf03",        // Pending
+        2: "3725360f-519b-4b18-a593-494d60a29c9f",        // Cancelled
+        3: "aa99e8d0-c1d5-4071-b915-d240bbb1aed9",        // Confirmed
+        4: "aa99e8d0-c1d5-4071-b915-d240bbb1aed9",        // Prepped
+        5: "aa99e8d0-c1d5-4071-b915-d240bbb1aed9",        // On Location
+        6: "3986020540",                                    // Retur
+        7: "4b27b500-f031-4927-9811-68a0b525cbae",        // Inquiry
+        8: "4b27b500-f031-4927-9811-68a0b525cbae",        // Concept
+        9: "3531598027",                                  // To be invoiced
+        11: "3c85a297-e9ce-400b-b42e-9f16853d69d6",       // Invoiced
+        12: "3531598027"                                  // To be invoiced
+    };
+
+    const dealstage = dealStageMap[status.id];
+
+    const body = {
+        properties: {
+            hs_order_name: order.displayname,
+            hs_total_price: total_price,
+            hs_pipeline: "14a2e10e-5471-408a-906e-c51f3b04369e",
+            hs_pipeline_stage: dealstage,
+            start_projekt_period: order.usageperiod_start,
+            slut_projekt_period: order.usageperiod_end,
+            slut_planning_period: order.planperiod_end,
+            start_planning_period: order.planperiod_start,
+            rabat: rabat,
+            fixed_price: order.fixed_price,
+            rental_price: order.project_rental_price,
+            sale_price: order.project_sale_price,
+            crew_price: order.project_crew_price,
+            transport_price: order.project_transport_price
+        }
+    };
+
+    const response = await fetch(url, {
+        method: "PATCH",
+        headers: {
+            'Content-Type': 'application/json',
+            "Accept": "application/json",
+            "Authorization": `Bearer ${HUBSPOT_TOKEN}`,
+        },
+        body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errText}`);
+    }
+
+    const output = await response.json();
+    return output.properties.hs_object_id;
+}
+
+async function updateAllOrders() {
+    console.log(`####### STARTER MED AT KRYDS TJEK INFORMATION #######`);
+    
+    const [allOrders, [sqlOrders]] = await Promise.all([
+        hubspotGetAllObjects("0-123"),
+        pool.query('SELECT * FROM synced_order')
+    ]);
+    console.log(`STATUS | Starter sync af alle order`);
+    let amount = allOrders.length
+    let i = 0
+    for (const order of allOrders) {       
+        i++
+        const findSqlOrder = sqlOrders.find(row => row.hubspot_order_id.toString() === order.id.toString())
+        const rentmanSubProject = await rentmanGetFromEndpoint(`/subprojects/${findSqlOrder.rentman_subproject_id}`)
+        if (!rentmanSubProject) continue;
+        await hubspotPatchOrder(rentmanSubProject, order.id)
+        console.log(`FÆRDIG | ${rentmanSubProject.displayname} er opdateret (${i}/${amount})`);
+        
+    }
+
+}
+
+updateAllOrders();

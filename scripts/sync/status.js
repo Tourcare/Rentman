@@ -126,22 +126,25 @@ async function getOrderStatus(order) {
 }
 
 const dealStageMap = {
-    "937ea84d-0a4f-4dcf-9028-3f9c2aafbf03": "Koncept",
+    "937ea84d-0a4f-4dcf-9028-3f9c2aafbf03": "Afventer Kunde",
     "3725360f-519b-4b18-a593-494d60a29c9f": "Aflyst",
     "aa99e8d0-c1d5-4071-b915-d240bbb1aed9": "Bekræftet",
     "3852081363": "Afsluttet",
     "4b27b500-f031-4927-9811-68a0b525cbae": "Koncept",
     "3531598027": "Skal faktureres",
-    "3c85a297-e9ce-400b-b42e-9f16853d69d6": "Faktureret"
+    "3c85a297-e9ce-400b-b42e-9f16853d69d6": "Faktureret",
+    "3986020540": "Retur"
 };
 
 const setStageMap = {
     "Koncept": "appointmentscheduled",
+    "Afventer kunde": "qualifiedtobuy",
     "Aflyst": "decisionmakerboughtin",
     "Bekræftet": "presentationscheduled",
     "Afsluttet": "3851496691",
     "Skal faktureres": "3852552384",
-    "Faktureret": "3852552385"
+    "Faktureret": "3852552385",
+    "Retur": "3986019567"
 }
 
 async function hubspotUpdateDeal(deal, status) {
@@ -173,33 +176,35 @@ async function hubspotUpdateDeal(deal, status) {
 async function fixDealStatus() {
     const projects = await hubspotGetAllDeals();
     console.log(`Alle projecter hentet`);
-    
-    const priority = ["Skal faktureres", "Faktureret", "Afsluttet", "Bekræftet", "Koncept", "Aflyst"]
+
+    const priority = ["Skal faktureres", "Bekræftet", "Afsluttet", "Koncept", "Retur", "Faktureret","Aflyst"]
+    let i = 0
     for (const project of projects) {
+        i++
         const associations = project.associations?.orders?.results
-        if (!associations) continue;
-        let totalStatus = [];
-        console.log(` `);
-        console.log(` ---> Ny tjek for ${project.properties.dealname} <---`);
-        for (const order of associations) {
-            const status = await getOrderStatus(order);
-            const mapped = dealStageMap[status];
-            if (mapped) totalStatus.push(mapped);
-        }
-        const allSame = totalStatus.length > 0 &&
-            totalStatus.every(s => s === totalStatus[0]);
+        if (associations) {
+            let totalStatus = [];
+            console.log(`WAIT | Tjekker deal ${project.properties.dealname} (${i}/${projects.length})`);
+            for (const order of associations) {
+                const status = await getOrderStatus(order);
+                const mapped = dealStageMap[status];
+                if (mapped) totalStatus.push(mapped);
+            }
+            const allSame = totalStatus.length > 0 &&
+                totalStatus.every(s => s === totalStatus[0]);
 
-        if (allSame) {
-            console.log(`Ender med ${totalStatus[0]}`);
-            await hubspotUpdateDeal(project, totalStatus[0]);
-        } else {
-            const status = priority.find(p => totalStatus.includes(p)) || null;
-            console.log(`Ender med ${status}`);
-            await hubspotUpdateDeal(project, status);
+            if (allSame) {
+                console.log(`FÆRDIG | Opdaterer ${project.properties.dealname} med status ${totalStatus[0]}`);
+                await hubspotUpdateDeal(project, totalStatus[0])
+
+            } else {
+                const status = priority.find(p => totalStatus.includes(p)) || null;
+                console.log(`FÆRDIG | Opdaterer ${project.properties.dealname} med status ${status}`);
+                await hubspotUpdateDeal(project, status)
+                
+            }
         }
-        
     }
-
 }
 
 fixDealStatus();

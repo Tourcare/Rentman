@@ -147,13 +147,10 @@ async function handleHubSpotDealWebhook(events) {
                                 [rentman.data.id, event.objectId, company[0]?.id]
                             );
 
-                            whatHappened = true;
                             break;
                         }
                     }
-                }
-
-                if (!whatHappened) {
+                } else {
                     const rentman = await rentmanPostRentalRequest(deal);
                     await pool.query(
                         'INSERT INTO synced_request (rentman_request_id, hubspot_deal_id) VALUES (?, ?)',

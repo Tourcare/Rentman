@@ -1,5 +1,3 @@
-const dotenv = require('dotenv');
-
 const pool = require('../../db');
 
 const HUBSPOT_TOKEN = process.env.HUBSPOT_API_TOKEN;
@@ -15,6 +13,84 @@ async function loadSqlUsers() {
 }
 
 loadSqlUsers();
+
+async function getOrderStatus(order) {
+    const url = `${HUBSPOT_ENDPOINT}0-123/${order}?properties=hs_pipeline_stage`
+    const response = await fetch(url, {
+        method: "GET",
+        headers: {
+            'Content-Type': 'application/json',
+            "Accept": "application/json",
+            "Authorization": `Bearer ${HUBSPOT_TOKEN}`,
+        }
+    });
+    const output = await response.json();
+    return output.properties.hs_pipeline_stage
+}
+
+async function hubspotGetDealInfo(deal) {
+    const url = `${HUBSPOT_ENDPOINT}0-3/${deal}?associations=0-123`
+    const response = await fetch(url, {
+        method: "GET",
+        headers: {
+            'Content-Type': 'application/json',
+            "Accept": "application/json",
+            "Authorization": `Bearer ${HUBSPOT_TOKEN}`,
+        }
+    });
+    const output = await response.json();
+    return output
+}
+
+const dealStageMap = {
+    "937ea84d-0a4f-4dcf-9028-3f9c2aafbf03": "Afventer Kunde",
+    "3725360f-519b-4b18-a593-494d60a29c9f": "Aflyst",
+    "aa99e8d0-c1d5-4071-b915-d240bbb1aed9": "Bekræftet",
+    "3852081363": "Afsluttet",
+    "4b27b500-f031-4927-9811-68a0b525cbae": "Koncept",
+    "3531598027": "Skal faktureres",
+    "3c85a297-e9ce-400b-b42e-9f16853d69d6": "Faktureret",
+    "3986020540": "Retur"
+};
+
+const setStageMap = {
+    "Koncept": "appointmentscheduled",
+    "Afventer kunde": "qualifiedtobuy",
+    "Aflyst": "decisionmakerboughtin",
+    "Bekræftet": "presentationscheduled",
+    "Afsluttet": "3851496691",
+    "Skal faktureres": "3852552384",
+    "Faktureret": "3852552385",
+    "Retur": "3986019567"
+}
+
+async function updateHubSpotDealStatus(deal) {
+    const project = await hubspotGetDealInfo(deal);
+
+    const priority = ["Skal faktureres", "Bekræftet", "Faktureret", "Afsluttet", "Afventer Kunde", "Koncept", "Aflyst"]
+    const associations = project.associations?.orders?.results
+
+    if (associations) {
+        let totalStatus = [];
+
+        for (const order of associations) {
+            const status = await getOrderStatus(order.id);
+            const mapped = dealStageMap[status];
+            if (mapped) totalStatus.push(mapped);
+        }
+        const allSame = totalStatus.length > 0 &&
+            totalStatus.every(s => s === totalStatus[0]);
+
+        if (allSame) {
+            return setStageMap[totalStatus[0]];
+        } else {
+            const status = priority.find(p => totalStatus.includes(p)) || null;
+            return setStageMap[status];
+
+        }
+    }
+
+}
 
 function sanitizeNumber(value, decimals = 2) {
     const EPSILON = 1e-6;
@@ -79,18 +155,38 @@ async function hubspotCreateDeal(deal, company, contact) {
 
     const usageStart = new Date(deal.usageperiod_start);
     const usageEnd = new Date(deal.usageperiod_start);
+    const plannedStart = new Date(deal.planperiod_start);
+    const plannedEnd = new Date(deal.planperiod_end);
+    const createDate = new Date(deal.created)
     const todayDate = new Date(); // dags dato
 
     const body = {
         properties: {
             dealname: deal.displayname,
-            dealstage,
-            usage_period: contact ? deal.usageperiod_start : usageStart,
-            slut_projekt_period: contact ? deal.usageperiod_end : usageEnd,
-            amount: total_price
+            dealstage: "appointmentscheduled",
+            usage_period: usageStart,
+            slut_projekt_period: usageEnd,
+            amount: total_price,
+            start_planning_period: plannedStart,
+            slut_planning_period: plannedEnd,
         },
+        createdAt: createDate,
         associations: []
     };
+
+    if (deal.account_manager) {
+        const crewSplit = deal.account_manager.split("/").pop();
+        const crewId = Number(crewSplit);
+
+        accountManager = userFromSql.find(
+            row => row.rentman_id.toString() === crewId.toString()
+        );
+
+        if (accountManager) {
+            body.properties.hubspot_owner_id = accountManager.hubspot_id;
+            console.log(`IGANG | Tilføjet ${accountManager.navn} til deal ${deal.displayname}`);
+        }
+    }
 
     if (company) {
         body.associations.push({
@@ -107,96 +203,6 @@ async function hubspotCreateDeal(deal, company, contact) {
             types: [{
                 associationCategory: "HUBSPOT_DEFINED",
                 associationTypeId: 3
-            }]
-        });
-    }
-
-
-    const response = await fetch(url, {
-        method: "POST",
-        headers: {
-            'Content-Type': 'application/json',
-            "Accept": "application/json",
-            "Authorization": `Bearer ${HUBSPOT_TOKEN}`,
-        },
-        body: JSON.stringify(body),
-    });
-
-    if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`HTTP error! status: ${response.status}, message: ${errText}`);
-    }
-
-    const output = await response.json();
-    return output.properties.hs_object_id;
-}
-
-
-async function hubspotCreateOrder(data, deal, company, contact) {
-    const order = await rentmanGetFromEndpoint(`/subprojects/${data.id}`)
-    const status = await rentmanGetFromEndpoint(order.status)
-    const url = `${HUBSPOT_ENDPOINT}orders`
-    console.log(`     + Order ${order.displayname}`)
-
-    const total_price = sanitizeNumber(order.project_total_price)
-
-    let dealstage;
-
-    if ([7, 8].includes(status.id)) { // Status 7 = Inquiry, 8 = Concept
-        dealstage = "4b27b500-f031-4927-9811-68a0b525cbae"
-    } else if (status.id === 1) { // Status 1 = pending, 
-        dealstage = "937ea84d-0a4f-4dcf-9028-3f9c2aafbf03"
-    } else if ([3, 4, 5, 6].includes(status.id)) { // Status 3 = Confirmed, Status 4 = Prepped, Status 5 = On Location
-        dealstage = "aa99e8d0-c1d5-4071-b915-d240bbb1aed9"
-    } else if (status.id === 2) { // Status 2 = Cancled, 
-        dealstage = "3725360f-519b-4b18-a593-494d60a29c9f"
-    } else if ([9, 12].includes(status.id)) { // To be invoiced
-        dealstage = "3531598027"
-    } else if (status.id === 11) { // Invoiced
-        dealstage = "3c85a297-e9ce-400b-b42e-9f16853d69d6"
-    }
-
-    const body = {
-        properties: {
-            hs_order_name: order.displayname,
-            hs_total_price: total_price,
-            hs_pipeline: "14a2e10e-5471-408a-906e-c51f3b04369e",
-            hs_pipeline_stage: dealstage,
-            start_projekt_period: order.usageperiod_end,
-            slut_projekt_period: order.usageperiod_start
-        },
-        associations: []
-    };
-
-    // Tilføj company association (kun hvis company findes)
-    if (company) {
-        body.associations.push({
-            to: { id: company },
-            types: [{
-                associationCategory: "HUBSPOT_DEFINED",
-                associationTypeId: 509
-            }]
-        });
-    }
-
-    // Tilføj deal association (kun hvis deal findes)
-    if (deal) {
-        body.associations.push({
-            to: { id: deal },
-            types: [{
-                associationCategory: "HUBSPOT_DEFINED",
-                associationTypeId: 512
-            }]
-        });
-    }
-
-    // Tilføj contact association (kun hvis contact findes)
-    if (contact) {
-        body.associations.push({
-            to: { id: contact },
-            types: [{
-                associationCategory: "HUBSPOT_DEFINED",
-                associationTypeId: 507
             }]
         });
     }
@@ -341,7 +347,10 @@ async function hubspotUpdateDeal(id, deal) {
     const total_price = sanitizeNumber(deal.project_total_price)
 
     const usageStart = new Date(deal.usageperiod_start);
-    const usageEnd = new Date(deal.usageperiod_start);
+    const usageEnd = new Date(deal.usageperiod_end);
+    const plannedStart = new Date(deal.planperiod_start);
+    const plannedEnd = new Date(deal.planperiod_end);
+    const createDate = new Date(deal.created)
     const todayDate = new Date(); // dags dato
 
     if (usageStart < todayDate) {
@@ -356,9 +365,15 @@ async function hubspotUpdateDeal(id, deal) {
             dealstage,
             usage_period: usageStart,
             slut_projekt_period: usageEnd,
-            amount: total_price
-        }
+            amount: total_price,
+            start_planning_period: plannedStart,
+            slut_planning_period: plannedEnd,
+        },
+        createdAt: createDate,
     };
+
+    const status = await updateHubSpotDealStatus(id);
+    if (status) body.properties.dealstage = status;
 
     if (deal.account_manager) {
         const crewSplit = deal.account_manager.split("/").pop();
@@ -429,7 +444,7 @@ async function updateDeal(webhook) {
     const isCustomerUpdated = oldCompany[0]?.rentman_id == contactInfo?.id;
     const isContactUpdated = oldContact[0]?.rentman_id == customerInfo?.id;
     const associationsUpdated = isCustomerUpdated || isContactUpdated;
-    
+
 
     // Hjælpefunktion til at opdatere associationer
     const updateAssociations = async (objectType, objectId, syncedCompanyId, syncedContactId, companyAssocId, contactAssocId) => {

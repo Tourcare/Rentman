@@ -7,6 +7,7 @@ const { rentmanCrossCheckRental } = require("../services/rentman-request");
 const { syncDeal, updateDeal } = require("../services/rentman-update-deal");
 const { createOrders, updateOrders } = require("../services/rentman-update-order");
 const { createContact, updateContact, deleteContact } = require("../services/rentman-update-contact");
+const { linkFileToDeal } = require("../services/rentman-quotation-files");
 
 const router = express.Router();
 router.use(express.json());
@@ -51,6 +52,10 @@ router.post("/", async (req, res) => {
                 updateContact(event)
             } if (event.eventType === "delete") {
                 deleteContact(event)
+            }
+        } if (event?.itemType === "File") {
+            if (event.eventType === "create") {
+                linkFileToDeal(event)
             }
         }
     }

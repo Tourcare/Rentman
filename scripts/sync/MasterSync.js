@@ -325,7 +325,7 @@ async function syncContactsToCompanies() {
     console.log(`---> Opdatering færdig. Fandt ${i} virksomheder <---`);
 }
 
-//syncContactsToCompanies();
+syncContactsToCompanies();
 
 /* ###############################################################
 
@@ -370,6 +370,84 @@ async function rentmanGetProjects() {
 }
 
 // HUBSPOT | HUBSPOT | HUBSPOT | HUBSPOT | HUBSPOT | HUBSPOT | HUBSPOT | HUBSPOT | HUBSPOT | HUBSPOT | HUBSPOT
+
+async function getOrderStatus(order) {
+    const url = `${HUBSPOT_ENDPOINT}0-123/${order}?properties=hs_pipeline_stage`
+    const response = await fetch(url, {
+        method: "GET",
+        headers: {
+            'Content-Type': 'application/json',
+            "Accept": "application/json",
+            "Authorization": `Bearer ${HUBSPOT_TOKEN}`,
+        }
+    });
+    const output = await response.json();
+    return output.properties.hs_pipeline_stage
+}
+
+async function hubspotGetDealInfo(deal) {
+    const url = `${HUBSPOT_ENDPOINT}0-3/${deal}?associations=0-123`
+    const response = await fetch(url, {
+        method: "GET",
+        headers: {
+            'Content-Type': 'application/json',
+            "Accept": "application/json",
+            "Authorization": `Bearer ${HUBSPOT_TOKEN}`,
+        }
+    });
+    const output = await response.json();
+    return output
+}
+
+const dealStageMap = {
+    "937ea84d-0a4f-4dcf-9028-3f9c2aafbf03": "Afventer Kunde",
+    "3725360f-519b-4b18-a593-494d60a29c9f": "Aflyst",
+    "aa99e8d0-c1d5-4071-b915-d240bbb1aed9": "Bekræftet",
+    "3852081363": "Afsluttet",
+    "4b27b500-f031-4927-9811-68a0b525cbae": "Koncept",
+    "3531598027": "Skal faktureres",
+    "3c85a297-e9ce-400b-b42e-9f16853d69d6": "Faktureret",
+    "3986020540": "Retur"
+};
+
+const setStageMap = {
+    "Koncept": "appointmentscheduled",
+    "Afventer kunde": "qualifiedtobuy",
+    "Aflyst": "decisionmakerboughtin",
+    "Bekræftet": "presentationscheduled",
+    "Afsluttet": "3851496691",
+    "Skal faktureres": "3852552384",
+    "Faktureret": "3852552385",
+    "Retur": "3986019567"
+}
+
+async function updateHubSpotDealStatus(deal) {
+    const project = await hubspotGetDealInfo(deal);
+
+    const priority = ["Skal faktureres", "Bekræftet", "Faktureret", "Afsluttet", "Koncept", "Aflyst"]
+    const associations = project.associations?.orders?.results
+
+    if (associations) {
+        let totalStatus = [];
+
+        for (const order of associations) {
+            const status = await getOrderStatus(order.id);
+            const mapped = dealStageMap[status];
+            if (mapped) totalStatus.push(mapped);
+        }
+        const allSame = totalStatus.length > 0 &&
+            totalStatus.every(s => s === totalStatus[0]);
+
+        if (allSame) {
+            return setStageMap[totalStatus[0]];
+        } else {
+            const status = priority.find(p => totalStatus.includes(p)) || null;
+            return setStageMap[status];
+
+        }
+    }
+
+}
 
 async function hubspotCreateDeal(deal, company, contact) {
     const url = `${HUBSPOT_ENDPOINT}0-3`;
@@ -426,7 +504,11 @@ async function hubspotCreateDeal(deal, company, contact) {
 
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}, message: ${await response.text()}`);
 
-    return (await response.json()).properties.hs_object_id;
+    const returnedDeal = await response.json();
+
+    await updateHubSpotDealStatus(returnedDeal.properties.hs_object_id)
+
+    return returnedDeal.properties.hs_object_id;
 }
 
 async function hubspotCreateOrder(data, deal, company, contact) {
@@ -437,21 +519,22 @@ async function hubspotCreateOrder(data, deal, company, contact) {
 
     const total_price = sanitizeNumber(order.project_total_price);
 
-    const stageMap = {
-        1: "937ea84d-0a4f-4dcf-9028-3f9c2aafbf03",
-        2: "3725360f-519b-4b18-a593-494d60a29c9f",
-        3: "aa99e8d0-c1d5-4071-b915-d240bbb1aed9",
-        4: "aa99e8d0-c1d5-4071-b915-d240bbb1aed9",
-        5: "aa99e8d0-c1d5-4071-b915-d240bbb1aed9",
-        6: "aa99e8d0-c1d5-4071-b915-d240bbb1aed9",
-        7: "4b27b500-f031-4927-9811-68a0b525cbae",
-        8: "4b27b500-f031-4927-9811-68a0b525cbae",
-        9: "3531598027",
-        11: "3c85a297-e9ce-400b-b42e-9f16853d69d6",
-        12: "3531598027"
+
+    const dealStageMap = {
+        1: "937ea84d-0a4f-4dcf-9028-3f9c2aafbf03",        // Pending
+        2: "3725360f-519b-4b18-a593-494d60a29c9f",        // Cancelled
+        3: "aa99e8d0-c1d5-4071-b915-d240bbb1aed9",        // Confirmed
+        4: "aa99e8d0-c1d5-4071-b915-d240bbb1aed9",        // Prepped
+        5: "aa99e8d0-c1d5-4071-b915-d240bbb1aed9",        // On Location
+        6: "3986020540",                                    // Retur
+        7: "4b27b500-f031-4927-9811-68a0b525cbae",        // Inquiry
+        8: "4b27b500-f031-4927-9811-68a0b525cbae",        // Concept
+        9: "3531598027",                                  // To be invoiced
+        11: "3c85a297-e9ce-400b-b42e-9f16853d69d6",       // Invoiced
+        12: "3531598027"                                  // To be invoiced
     };
 
-    const dealstage = stageMap[status.id];
+    const dealstage = dealStageMap[status.id];
 
     const associations = [
         { to: { id: deal }, types: [{ associationCategory: "HUBSPOT_DEFINED", associationTypeId: 512 }] }
@@ -488,6 +571,7 @@ async function hubspotCreateOrder(data, deal, company, contact) {
 
 
 async function syncProjectsToDeals() {
+    console.log(`STARTER | Starter sync af deals og orders fra Rentman til HubSpot`);
     const rentmanAllProjects = await rentmanGetProjects();
     const [sqlProjectId] = await pool.query('SELECT rentman_project_id FROM synced_deals')
     const [sqlSubId] = await pool.query('SELECT rentman_subproject_id FROM synced_order')
@@ -495,6 +579,7 @@ async function syncProjectsToDeals() {
     for (const project of rentmanAllProjects) {
         const rentmanLinkedSubprojects = await rentmanGetFromEndpoint(`/projects/${project.id}/subprojects`)
         const checkSqlProject = sqlProjectId.find(row => row.rentman_project_id.toString() === project.id.toString())
+        console.log(`WAIT | Tjekker ${project.displayname} (${i}/${rentmanAllProjects.length})`);
         i++
         if (!checkSqlProject) {
             console.log(`WAIT | Opretter deal ${project.displayname}`);
@@ -519,8 +604,8 @@ async function syncProjectsToDeals() {
 
             const deal_id = await hubspotCreateDeal(projectInfo, companyId, contactId)
 
-            const sqlContactId = contactRows[0].id || 0
-            const sqlCompanyId = companyRows[0].id || 0
+            const sqlContactId = contactRows?.[0]?.id || 0
+            const sqlCompanyId = companyRows?.[0]?.id || 0
 
             const [result] = await pool.query(
                 'INSERT INTO synced_deals (project_name, rentman_project_id, hubspot_project_id, synced_companies_id, synced_contact_id) VALUES (?, ?, ?, ?, ?)',
@@ -560,8 +645,8 @@ async function syncProjectsToDeals() {
                     const companyId = companyRows.length ? companyRows[0].hubspot_id : null;
                     const contactId = contactRows[0] ? contactRows[0].hubspot_id : null;
 
-                    const sqlContactId = contactRows[0].id || 0
-                    const sqlCompanyId = companyRows[0].id || 0
+                    const sqlContactId = contactRows?.[0]?.id || 0
+                    const sqlCompanyId = companyRows?.[0]?.id || 0
 
                     const [dealRows] = await pool.execute(`SELECT * FROM synced_deals WHERE rentman_project_id = ?`, [project.id]);
 
@@ -578,6 +663,7 @@ async function syncProjectsToDeals() {
             }
 
         }
+
     }
     console.log(i);
 
