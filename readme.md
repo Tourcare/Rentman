@@ -1,1 +1,3 @@
-Alt skal omskrives :.)
+Alt skal omskrives :,)
+Det noget rod
+kh
