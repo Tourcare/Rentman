@@ -117,7 +117,7 @@ const dealStageMap = {
 
 const setStageMap = {
     "Koncept": "appointmentscheduled",
-    "Afventer kunde": "qualifiedtobuy",
+    "Afventer Kunde": "qualifiedtobuy",
     "Aflyst": "decisionmakerboughtin",
     "Bekræftet": "presentationscheduled",
     "Afsluttet": "3851496691",
@@ -133,7 +133,7 @@ async function updateHubSpotDealStatus(order) {
 
     const priority = ["Skal faktureres", "Bekræftet", "Faktureret", "Afsluttet", "Koncept", "Aflyst"]
     const associations = project.associations?.orders?.results
-    let status;
+    let newStatus;
 
     if (associations) {
         let totalStatus = [];
@@ -147,20 +147,20 @@ async function updateHubSpotDealStatus(order) {
             totalStatus.every(s => s === totalStatus[0]);
 
         if (allSame) {
-            status = setStageMap[totalStatus[0]];
+            newStatus = setStageMap[totalStatus[0]];
         } else {
             const status = priority.find(p => totalStatus.includes(p)) || null;
-            status = setStageMap[status];
+            newStatus = setStageMap[status];
 
         }
     }
     
-    if (status) {
+    if (newStatus) {
         let url = `${HUBSPOT_ENDPOINT}0-3/${order}`
 
         const body = {
             properties: {
-                dealstage: status,
+                dealstage: newStatus,
             }
         };
 
@@ -393,6 +393,7 @@ async function hubspotCreateOrder(order, deal, company, contact) {
     }
 
     const output = await response.json();
+    await updateHubSpotDealStatus(deal)
     return output.properties.hs_object_id;
 }
 

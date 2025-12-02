@@ -138,7 +138,7 @@ const dealStageMap = {
 
 const setStageMap = {
     "Koncept": "appointmentscheduled",
-    "Afventer kunde": "qualifiedtobuy",
+    "Afventer Kunde": "qualifiedtobuy",
     "Aflyst": "decisionmakerboughtin",
     "Bekræftet": "presentationscheduled",
     "Afsluttet": "3851496691",
