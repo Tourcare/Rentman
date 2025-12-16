@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="da">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Tourcare Access</title>
+    <link rel="stylesheet" href="/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,100..900;1,100..900&display=swap"
+        rel="stylesheet">
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+</head>
+
+<body>
+
+    <div class="image-side">
+        <div class="user-info">
+            <h1>STATUS</h1>
+            <div class="user-status">
+                <ul id="user-list">
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <div class="sync-side">
+
+        <div class="sync-wrapper">
+            <h1>Integration Indstillinger</h1>
+            <div id="loggedInUser"></div>
+        </div>
+
+        <div class="sync-container">
+            <div class="sync-type">
+                <h1>Sync projecter og subprojecter</h1>
+                <div class="button-wrapper">
+                    <button id="syncProjectAndSubBtn">Start Sync</button>
+                </div>
+            </div>
+
+            <div class="sync-type">
+                <h1>Sync virksomheder og kontakter</h1>
+                <div class="button-wrapper">
+                    <button id="syncCompanyAndContacts">Start Sync</button>
+                </div>
+            </div>
+
+            <div class="sync-type">
+                <h1>Sync project information</h1>
+                <div class="button-wrapper">
+                    <button id="crossCheckData">Start Sync</button>
+                </div>
+            </div>
+
+        </div>
+
+        <div class="text-wrapper">
+            <p>Sync af HubSpot og Rentman Integration må IKKE udføres på to gangen oveni hinanden! Hvis siden lukkes midt i en sync, skal der ventes min. 10 minutter, før en ny sync påbegyndes.<br><br>Alle fejl skal rapporteres til Sylvester</p>
+        </div>
+    </div>
+
+    <script src="/app.js"></script>
+</body>
+
+</html>

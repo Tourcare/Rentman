@@ -117,8 +117,8 @@ async function hubspotCreateContact(data, companyID) {
     const body = {
         "properties": {
             email: email,
-            lastname: `${data.firstname || ''}`,
-            firstname: `${data.lastname || ''}`
+            lastname: `${data.middle_name ? data.middle_name + " " : ""}${data.lastname || ""}`,
+            firstname: `${data.firstname || ''}`
         },
         "associations": [{
             "to": {
@@ -210,8 +210,8 @@ async function hubspotUpdateContact(id, data) {
     const body = {
         "properties": {
             email: email,
-            lastname: `${data.firstname || ''}`,
-            firstname: `${data.lastname || ''}`
+            lastname: `${data.middle_name ? data.middle_name + " " : ""}${data.lastname || ""}`,
+            firstname: `${data.firstname || ''}`
         }
     };
     const response = await fetch(url, {

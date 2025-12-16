@@ -101,7 +101,7 @@ async function hubspotGetDealInfo(order) {
         }
     });
     const output = await response.json();
-    return output 
+    return output
 }
 
 const dealStageMap = {
@@ -112,26 +112,28 @@ const dealStageMap = {
     "4b27b500-f031-4927-9811-68a0b525cbae": "Koncept",
     "3531598027": "Skal faktureres",
     "3c85a297-e9ce-400b-b42e-9f16853d69d6": "Faktureret",
-    "3986020540": "Retur"
+    "3986020540": "Retur",
+    "4012316916": "Mangler udstyr"
 };
 
 const setStageMap = {
     "Koncept": "appointmentscheduled",
-    "Afventer Kunde": "qualifiedtobuy",
+    "Afventer kunde": "qualifiedtobuy",
     "Aflyst": "decisionmakerboughtin",
     "Bekræftet": "presentationscheduled",
     "Afsluttet": "3851496691",
     "Skal faktureres": "3852552384",
     "Faktureret": "3852552385",
-    "Retur": "3986019567"
+    "Retur": "3986019567",
+    "Mangler udstyr": "4003784908"
 }
 
 async function updateHubSpotDealStatus(order) {
     console.log(`Kalder updateHubSpotDealStatus`);
-    
-    const project = await hubspotGetDealInfo(order); 
 
-    const priority = ["Skal faktureres", "Bekræftet", "Faktureret", "Afsluttet", "Koncept", "Aflyst"]
+    const project = await hubspotGetDealInfo(order);
+
+    const priority = ["Skal faktureres", "Bekræftet", "Faktureret", "Afsluttet", "Afventer kunde", "Koncept", "Aflyst"]
     const associations = project.associations?.orders?.results
     let newStatus;
 
@@ -154,7 +156,7 @@ async function updateHubSpotDealStatus(order) {
 
         }
     }
-    
+
     if (newStatus) {
         let url = `${HUBSPOT_ENDPOINT}0-3/${order}`
 
@@ -207,10 +209,18 @@ async function hubspotPatchOrder(order, current) {
         8: "4b27b500-f031-4927-9811-68a0b525cbae",        // Concept
         9: "3531598027",                                  // To be invoiced
         11: "3c85a297-e9ce-400b-b42e-9f16853d69d6",       // Invoiced
-        12: "3531598027"                                  // To be invoiced
+        12: "4012316916"                                  // To be invoiced - missing items
     };
 
     const dealstage = dealStageMap[status.id];
+
+    const project = order.project;
+    const projectArray = project.split("/").pop();
+    const projectNumber = parseInt(projectArray, 10);
+    
+    const now = new Date();
+    const isoDate = now.toISOString();
+    const encodedDate = encodeURIComponent(isoDate);
 
     const body = {
         properties: {
@@ -227,7 +237,8 @@ async function hubspotPatchOrder(order, current) {
             rental_price: order.project_rental_price,
             sale_price: order.project_sale_price,
             crew_price: order.project_crew_price,
-            transport_price: order.project_transport_price
+            transport_price: order.project_transport_price,
+            rentman_projekt: `https://tourcare2.rentmanapp.com/#/projects/${projectNumber}/details?subproject=${order.id}`
         }
     };
 
@@ -248,6 +259,36 @@ async function hubspotPatchOrder(order, current) {
 
     const output = await response.json();
     return output.properties.hs_object_id;
+}
+
+async function updateHubSpotDealFinancial(deal) {
+    const url = `${HUBSPOT_ENDPOINT}0-3/${deal}`
+    const [sqlData] = await pool.query(`SELECT * FROM synced_deals WHERE hubspot_project_id = ?`, [deal])
+    const rentmanData = await rentmanGetFromEndpoint(`/projects/${sqlData?.[0]?.rentman_project_id}`)
+    if (!rentmanData) return false;
+
+    const total_price = sanitizeNumber(rentmanData.project_total_price)
+
+    const body = {
+        properties: {
+            amount: total_price
+        }
+    };
+
+    const response = await fetch(url, {
+        method: "PATCH",
+        headers: {
+            'Content-Type': 'application/json',
+            "Accept": "application/json",
+            "Authorization": `Bearer ${HUBSPOT_TOKEN}`,
+        },
+        body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errText}`);
+    }
 }
 
 async function updateOrders(webhook) {
@@ -323,10 +364,18 @@ async function hubspotCreateOrder(order, deal, company, contact) {
         8: "4b27b500-f031-4927-9811-68a0b525cbae",        // Concept
         9: "3531598027",                                  // To be invoiced
         11: "3c85a297-e9ce-400b-b42e-9f16853d69d6",       // Invoiced
-        12: "3531598027"                                  // To be invoiced
+        12: "4012316916"                                  // To be invoiced - missing items
     };
 
     const dealstage = dealStageMap[status.id];
+
+    const project = order.project;
+    const projectArray = project.split("/").pop();
+    const projectNumber = parseInt(projectArray, 10);
+
+    const now = new Date();
+    const isoDate = now.toISOString();
+    const encodedDate = encodeURIComponent(isoDate);
 
     const body = {
         properties: {
@@ -343,7 +392,8 @@ async function hubspotCreateOrder(order, deal, company, contact) {
             rental_price: order.project_rental_price,
             sale_price: order.project_sale_price,
             crew_price: order.project_crew_price,
-            transport_price: order.project_transport_price
+            transport_price: order.project_transport_price,
+            rentman_projekt: `https://tourcare2.rentmanapp.com/#/projects/${projectNumber}/details?subproject=${order.id}`
         },
         associations: []
     };
@@ -420,7 +470,7 @@ async function createOrders(webhook) {
         }
 
         let dealInfo;
-        for (let i = 0; i < 3; i++) {
+        for (let i = 0; i < 6; i++) {
 
             const [checkOrder] = await pool.execute(
                 `SELECT * FROM synced_order WHERE rentman_subproject_id = ?`,
@@ -440,7 +490,7 @@ async function createOrders(webhook) {
             if (dealInfo?.[0]) break;
 
             console.log(`Ingen deal endnu for project ${projectInfo.id}. Venter og prøver igen...`);
-            await new Promise(r => setTimeout(r, 5000)); // vent 3 sek
+            await new Promise(r => setTimeout(r, 5000)); // vent 5 sek
         }
         if (dealInfo?.[0]) {
 

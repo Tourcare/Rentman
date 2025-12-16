@@ -69,6 +69,34 @@ async function hubspotUpdateDeal(deal, hidden, startPlanning, slutPlanning) {
 
 }
 
+async function hubspotUpdateRentmanLink(deal, rentmanid, type) {
+    let url = `${HUBSPOT_ENDPOINT}0-3/${deal}`
+    let link
+    if (type == "request") link = `https://tourcare2.rentmanapp.com/#/requests/${rentmanid}/details`
+
+    const body = {
+        properties: {
+            rentman_projekt: link,
+        }
+    };
+
+    const response = await fetch(url, {
+        method: "PATCH",
+        headers: {
+            'Content-Type': 'application/json',
+            "Accept": "application/json",
+            "Authorization": `Bearer ${HUBSPOT_TOKEN}`,
+        },
+        body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+        const errText = await response.text();
+        console.warn(`HTTP error! status: ${response.status}, message: ${errText}`);
+    }
+
+}
+
 async function rentmanPostRentalRequest(data, contact) {
     const url = `${RENTMAN_API_BASE}/projectrequests`;
 
@@ -77,6 +105,8 @@ async function rentmanPostRentalRequest(data, contact) {
         do {
             d.setDate(d.getDate() - 1);
         } while (d.getDay() === 0 || d.getDay() === 6);
+
+        d.setHours(14, 0, 0, 0); // 14:00
         return d;
     }
 
@@ -85,6 +115,8 @@ async function rentmanPostRentalRequest(data, contact) {
         do {
             d.setDate(d.getDate() + 1);
         } while (d.getDay() === 0 || d.getDay() === 6);
+
+        d.setHours(12, 0, 0, 0); // 12:00
         return d;
     }
 
@@ -100,7 +132,6 @@ async function rentmanPostRentalRequest(data, contact) {
         usageperiod_start: start,
         planperiod_end: planningPeriodEnd,
         planperiod_start: planningPeriodStart,
-        linked_contact: `/contacts/${contact}`
     };
 
 
@@ -171,7 +202,7 @@ async function objectCreation(event) {
         console.log(`${deal.properties.dealname} har en projektperiode`);
         let whatHappened = false;
 
-        if (deal.associations.companies) {
+        if (deal?.associations?.companies) {
             console.log(`${deal.properties.dealname} har tilknyttet virksomhed`);
 
             const results = deal.associations.companies.results;
@@ -191,6 +222,7 @@ async function objectCreation(event) {
                     const rentman = requestData.rentman
 
                     await hubspotUpdateDeal(deal.id, true, requestData.startPeriod, requestData.slutPeriod)
+                    await hubspotUpdateRentmanLink(deal.id, rentman.data.id, "request")
                     await pool.query(
                         'INSERT INTO synced_request (rentman_request_id, hubspot_deal_id, synced_companies_id) VALUES (?, ?, ?)',
                         [rentman.data.id, event.objectId, company[0]?.id]
@@ -200,7 +232,7 @@ async function objectCreation(event) {
                 }
             }
         } else {
-            const requestData = await rentmanPostRentalRequest(deal, company[0]?.rentman_id);
+            const requestData = await rentmanPostRentalRequest(deal);
             if (!requestData) return false;
             const rentman = requestData.rentman
             await hubspotUpdateDeal(deal.id, true, requestData.startPeriod, requestData.slutPeriod)
@@ -236,7 +268,7 @@ async function handleHubSpotDealWebhook(events) {
                     } else {
                         await hubspotUpdateDeal(event.objectId, true)
                     }
-                    
+
 
                 }
             }

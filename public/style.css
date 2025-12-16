@@ -1,0 +1,224 @@
+* {
+    padding: 0;
+    margin: 0;
+}
+
+body {
+    font-family: Montserrat, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+}
+
+.image-side {
+    width: 45%;
+    height: 100%;
+    overflow: hidden;
+
+    background-image: url('img/image.png');
+    background-size: cover;
+    background-position: 50% 50%;
+
+    display: flex;
+    justify-content: center;
+    align-items: center;
+
+    @media (max-width: 728px) {
+        width: 100%;
+        position: absolute;
+    }
+
+    .user-info {
+        display: none;
+        background-color: rgb(241, 241, 241);
+        height: 350px;
+        width: 275px;
+        padding: 35px 25px;
+        border-radius: 12px;
+        box-shadow: 0 8px 15px rgba(0, 0, 0, 0.1);
+        font-family: Montserrat, sans-serif;
+
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 300;
+            text-align: center;
+            padding-bottom: 10px;
+            border-bottom: black solid 1px;
+        }
+
+        .user-status {
+            padding: 18px 5px;
+            #user-list {
+                overflow: hidden auto;
+            }
+            li {
+                list-style: none;
+                margin-bottom: 8px;
+                font-size: 15px;
+            }
+        }
+    }
+}
+
+
+.login-side {
+    width: 55%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background-color: rgb(241, 241, 241);
+    filter: blur(0px);
+    gap: 40px;
+
+    @media (max-width: 728px) {
+        background-color: rgba(255, 255, 255, 0);
+        width: 100%;
+    }
+
+    .login-wrapper {
+        h1 {
+            font-size: 3rem;
+            font-weight: 200;
+            text-transform: uppercase;
+
+
+            @media (max-width: 728px) {
+                font-size: 2.5rem;
+            }
+        }
+    }
+
+    .login-container {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-evenly;
+        align-content: center;
+        background: white;
+        padding: 0.4rem 2.5rem;
+        border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(109, 1, 64, 0.1);
+        width: 250px;
+        text-align: center;
+        height: 300px;
+
+        #status {
+            color: red;
+        }
+
+        .input-wrapper {
+            display: flex;
+            flex-direction: column;
+            gap: 30px;
+            margin-top: -1.8rem;
+
+            input {
+                padding-left: 8px;
+                height: 35px;
+                width: 90%;
+                border-radius: 8px;
+                margin-top: 10px;
+                border: 0px;
+                background-color: rgb(236, 236, 236);
+            }
+
+            label {
+                font-size: 1rem;
+
+            }
+        }
+
+        .button-wrapper {
+            button {
+                background: #007bff;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 8px;
+                cursor: pointer;
+                font-size: 16px;
+            }
+
+            button:hover {
+                background: #0056b3;
+            }
+        }
+    }
+}
+
+.sync-side {
+    width: 55%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background-color: rgb(241, 241, 241);
+    filter: blur(0px);
+    gap: 40px;
+
+    @media (max-width: 728px) {
+        background-color: rgba(255, 255, 255, 0);
+        width: 100%;
+    }
+
+    .sync-wrapper {
+        h1 {
+            font-size: 3rem;
+            font-weight: 200;
+            text-transform: uppercase;
+        }
+
+        #loggedInUser {
+            text-align: center;
+        }
+    }
+
+    .text-wrapper {
+        padding: 0 10rem;
+        text-align: center;
+
+        @media (max-width: 728px) {
+            display: none;
+        }
+    }
+
+    .sync-container {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-evenly;
+        gap: 15px;
+        align-content: center;
+        background: white;
+        padding: 0.4rem 2.5rem;
+        border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(109, 1, 64, 0.1);
+        width: 250px;
+        text-align: center;
+        height: 400px;
+        
+        h1 {
+            font-size: 1.2rem;
+            font-weight: 400;
+            margin-bottom: 10px;
+        }
+
+        .button-wrapper {
+            button {
+                background: #007bff;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 8px;
+                cursor: pointer;
+                font-size: 16px;
+            }
+
+            button:hover {
+                background: #0056b3;
+            }
+        }
+    }
+}

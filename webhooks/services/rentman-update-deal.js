@@ -50,7 +50,8 @@ const dealStageMap = {
     "4b27b500-f031-4927-9811-68a0b525cbae": "Koncept",
     "3531598027": "Skal faktureres",
     "3c85a297-e9ce-400b-b42e-9f16853d69d6": "Faktureret",
-    "3986020540": "Retur"
+    "3986020540": "Retur",
+    "4012316916": "Mangler udstyr"
 };
 
 const setStageMap = {
@@ -61,7 +62,8 @@ const setStageMap = {
     "Afsluttet": "3851496691",
     "Skal faktureres": "3852552384",
     "Faktureret": "3852552385",
-    "Retur": "3986019567"
+    "Retur": "3986019567",
+    "Mangler udstyr": "4003784908"
 }
 
 async function updateHubSpotDealStatus(deal) {
@@ -353,12 +355,7 @@ async function hubspotUpdateDeal(id, deal) {
     const plannedEnd = new Date(deal.planperiod_end);
     const createDate = new Date(deal.created)
     const todayDate = new Date(); // dags dato
-
-    if (usageStart < todayDate) {
-        dealstage = "presentationscheduled";
-    } else {
-        dealstage = "appointmentscheduled";
-    }
+    const link = `https://tourcare2.rentmanapp.com/#/projects/${deal.id}/details`
 
     const body = {
         properties: {
@@ -369,6 +366,9 @@ async function hubspotUpdateDeal(id, deal) {
             amount: total_price,
             start_planning_period: plannedStart,
             slut_planning_period: plannedEnd,
+            opret_i_rentam_request: "Ja",
+            hidden_rentman_request: true,
+            rentman_projekt: link
         },
         createdAt: createDate,
     };
@@ -407,7 +407,7 @@ async function hubspotUpdateDeal(id, deal) {
 
 }
 
-async function updateDeal(webhook) {
+async function updateDeal(webhook, request) {
     console.log('updateDeal funktion kaldet!');
 
     // Hent projekt og relaterede data
@@ -471,7 +471,7 @@ async function updateDeal(webhook) {
     };
 
     // Opdater deal associationer kun hvis opdateret
-    if (!associationsUpdated) {
+    if (!associationsUpdated || request) {
         await updateAssociations("deals", hubspotDeal.hubspot_project_id, hubspotDeal.synced_companies_id, hubspotDeal.synced_contact_id, 5, 3);
 
         // Opdater subprojekter (orders)

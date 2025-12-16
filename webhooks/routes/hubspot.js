@@ -65,7 +65,6 @@ function filterWebhooks(events) {
 
 router.post("/", async (req, res) => {
     const events = req.body;
-    //console.log(events);
     
     res.status(200).send("OK");
     if (events[0].changeSource === "INTEGRATION" || events[0].changeSource === "API") {
@@ -80,6 +79,8 @@ router.post("/", async (req, res) => {
     }
 
     // Håndter contact events (companies og contacts)
+    console.log(events);
+    
     let contactEvents;
     contactEvents = contactEvents = events.filter(event => event.objectTypeId === "0-1" || event.objectTypeId === "0-2");
     if (events[0].subscriptionType === "object.associationChange") contactEvents = true

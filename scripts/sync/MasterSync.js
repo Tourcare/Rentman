@@ -176,8 +176,8 @@ async function hubspotCreateContact(data, companyID) {
     const body = {
         "properties": {
             email: email,
-            lastname: `${data.firstname}`,
-            firstname: `${data.lastname}`
+            lastname: `${data.middle_name ? data.middle_name + " " : ""}${data.lastname || ""}`,
+            firstname: `${data.firstname || ''}`
         },
         "associations": [{
             "to": {
@@ -384,7 +384,7 @@ async function syncContactsToCompanies() {
     console.log(`---> Opdatering færdig. Fandt ${i} virksomheder <---`);
 }
 
-//syncContactsToCompanies();
+syncContactsToCompanies();
 
 /* ###############################################################
 

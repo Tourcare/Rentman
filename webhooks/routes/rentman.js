@@ -8,6 +8,7 @@ const { syncDeal, updateDeal } = require("../services/rentman-update-deal");
 const { createOrders, updateOrders, deleteOrder } = require("../services/rentman-update-order");
 const { createContact, updateContact, deleteContact } = require("../services/rentman-update-contact");
 const { linkFileToDeal } = require("../services/rentman-quotation-files");
+const { newUpdateOnEquipment } = require("../services/rentman-cost-update");
 
 const router = express.Router();
 router.use(express.json());
@@ -31,7 +32,7 @@ router.post("/", async (req, res) => {
                 if (!crossCheck) { // Ikke request
                     syncDeal(event)
                 } else {
-                    updateDeal(event)
+                    updateDeal(event, true)
                 }
 
 
@@ -62,6 +63,8 @@ router.post("/", async (req, res) => {
             if (event.eventType === "create") {
                 linkFileToDeal(event)
             }
+        } if (["ProjectEquipmentGroup", "ProjectCost"].includes(event?.itemType)) {
+            newUpdateOnEquipment(event)
         }
     }
 

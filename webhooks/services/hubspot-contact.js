@@ -1,4 +1,5 @@
 // hubspot-contact.js (opdateret)
+const { log } = require('winston');
 const pool = require('../../db');
 const dotenv = require('dotenv');
 
@@ -178,6 +179,7 @@ async function rentmanUpdateContactPerson(id, data) {
     const body = {
         firstname: data.properties.firstname || '',
         lastname: data.properties.lastname || '',
+
         email: email
     };
     console.log(`Opdaterer kontaktperson i Rentman ID: ${id}`);
@@ -249,18 +251,25 @@ async function rentmanDeleteContactPerson(id) {
 // Hovedfunktion til at håndtere HubSpot webhooks for contacts
 async function handleHubSpotContactWebhook(events) {
     console.log(`Behandler ${events.length} events fra HubSpot webhook`);
+    const ranNum = Math.floor(Math.random() * 2) + 1;
+    let amn = 0
     try {
 
         for (const event of events) {
-            if (event.changeSource === "OBJECT_MERGE") break; 
+            amn++
+            const waitTime = Math.floor(Math.random() * (2000 - 500 + 1)) + 500;
+            await new Promise(r => setTimeout(r, waitTime))
+            if (event.changeSource === "OBJECT_MERGE") break;
             if (event.objectId) { // Alle ikke associations
-
 
                 // #########################
                 // #        CONTACTS       #
                 // #########################
 
                 if (event.objectTypeId === "0-1") {
+                    console.log(`Trigger event: (0-1)`);
+                    console.log(event);
+                    if (event.subscriptionType === "object.deletion") continue;
                     const contact = await hubspotGetFromEndpoint(event.objectTypeId, event.objectId, "?associations=companies")
                     if (event.subscriptionType === "object.creation") {
                         if (!contact?.associations?.companies) {
@@ -323,6 +332,10 @@ async function handleHubSpotContactWebhook(events) {
                     // #########################
 
                 } else if (event.objectTypeId === "0-2") {
+                    console.log(`Trigger event: (0-2)`);
+                    console.log(event);
+                    if (event.subscriptionType === "object.deletion") continue;
+
                     const company = await hubspotGetFromEndpoint(event.objectTypeId, event.objectId, "?properties=cvrnummer,name&associations=contacts")
 
                     if (event.subscriptionType === "object.creation") {
@@ -367,8 +380,10 @@ async function handleHubSpotContactWebhook(events) {
 
 
             } else { //alle associations
-
+                console.log(`Trigger event: (0-2)`);
+                console.log(event);
                 if (event.associationType === "CONTACT_TO_COMPANY" || event.associationType === "COMPANY_TO_CONTACT") {
+
                     const type = event.associationType.split("_TO_")
                     let company;
                     let contact;
@@ -386,7 +401,7 @@ async function handleHubSpotContactWebhook(events) {
                     if (!company) break;
                     if (!contact) break;
                     // FINDER COMPANY I DB
-                    for (let i = 0; i < 3; i++) {
+                    for (let i = 0; i < ranNum; i++) {
                         [dbCompany] = await pool.query('SELECT * FROM synced_companies WHERE hubspot_id = ?', [company.id])
 
                         if (dbCompany?.[0]) break;
@@ -400,10 +415,9 @@ async function handleHubSpotContactWebhook(events) {
                         console.log('STOPPER Fandt ingen company i Rentman.');
                         break;
                     }
-
+                    let dbContacts;
                     if (event.associationRemoved) {
 
-                        let dbContacts;
                         for (let i = 0; i < 3; i++) {
                             [dbContacts] = await pool.query('SELECT * FROM synced_contacts WHERE hubspot_id = ?', [contact.id])
 
@@ -412,35 +426,72 @@ async function handleHubSpotContactWebhook(events) {
                             console.log(`Fandt ingen contact med Hubspot ID ${contact.id}. Prøver igen.`);
                             await new Promise(r => setTimeout(r, 3000)); // vent 3 sek
                         }
-                        const rentmanContact = dbContacts?.[0]?.rentman_id
+                        const rentmanContact = dbContacts
                         if (!rentmanContact) {
                             console.log('STOPPER Fandt ingen contact i Rentman.');
                             break;
                         }
-                        await rentmanDeleteContactPerson(rentmanContact)
-                        await pool.query(
-                            'DELETE FROM synced_contacts WHERE hubspot_id = ?', [contact.id]
-                        )
-                        console.log(`Slettede kontaktperson ${name}`);
+                        for (const sqlLine of dbContacts) {
+                            if (sqlLine.hubspot_company_contected == event.toObjectId) {
+                                await rentmanDeleteContactPerson(rentmanContact)
+                                await pool.query(
+                                    'DELETE FROM synced_contacts WHERE hubspot_id = ?', [contact.id]
+                                )
+                                console.log(`Slettede kontaktperson ${name}`);
+                                break;
+                            }
+                        }
+
+
                     } else {
+                        let dublet
+                        for (let d = 0; d < 2; d++) {
+                            for (let i = 0; i < ranNum + amn; i++) {
+                                [dbContacts] = await pool.query('SELECT * FROM synced_contacts WHERE hubspot_id = ?', [contact.id])
+                                console.log(`Tjekker dubeletter`);
+
+                                if (dbContacts?.[0]) break;
+                                // vent 1 sek
+                            }
+                            for (const rentmanContact of dbContacts) {
+                                console.log(rentmanContact);
+
+                                if (rentmanContact) {
+                                    const hubspotId = rentmanContact?.hubspot_company_conntected;
+                                    const fromId = event?.fromObjectId;
+                                    const toId = event?.toObjectId;
+                                    if (
+                                        hubspotId != null &&
+                                        (String(hubspotId) == String(fromId) || String(hubspotId) == String(toId))
+                                    ) {
+                                        console.log('STOPPER kontaktpersonen findes allerede.');
+                                        dublet = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            await new Promise(r => setTimeout(r, waitTime))
+                        }
+                        if (dublet) break;
+                        console.log(`Ingen dubletter`);
                         const rentmanId = await rentmanCreateContactPerson(contact, rentmanCompany)
                         await pool.query(
                             'INSERT INTO synced_contacts (name, rentman_id, hubspot_id, hubspot_company_conntected) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE name=VALUES(name), hubspot_id=VALUES(hubspot_id)',
                             [name, rentmanId.id, contact.id, dbCompany?.[0]?.hubspot_id]
                         );
                         console.log(`Oprettede kontaktperson ${name}`);
-                        
+                        break;
                     }
 
                 }
 
-
             }
+
+
         }
 
     } catch (err) {
         console.log(err);
-
     }
 }
 
