@@ -212,7 +212,7 @@ async function objectCreation(event) {
 
                     let [company] = await pool.execute('SELECT * FROM synced_companies WHERE hubspot_id = ?', [result.id]);
 
-                    if (!company[0]) {
+                    if (company[0]) {
                         [company] = await pool.execute('SELECT * FROM synced_companies WHERE name = ?', ["Mangler Virksomhed"]);
                     }
 
