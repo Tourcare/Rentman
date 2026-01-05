@@ -57,14 +57,14 @@ async function rentmanGetFromEndpoint(endpoint, attempt = 1) {
     }
 }
 
-async function hubspotUploadFile(link, projectName) {
+async function hubspotUploadFile(link, projectName, type) {
     let url = `https://api.hubapi.com/files/v3/files/import-from-url/async`
 
     const body = {
         access: "PUBLIC_NOT_INDEXABLE",
         url: link,
         folderId: "308627103977",
-        name: `Tilbud vedr. ${projectName}`
+        name: `${type} ${projectName}`
     }
 
     const response = await fetch(url, {
@@ -151,8 +151,10 @@ async function linkFileToDeal(event) {
 
     const fileLink = fileInfo.url
 
-    if (fileInfo.file_itemtype == "Offerte") {
-        const quotation = await rentmanGetFromEndpoint(`/quotes/${fileInfo.file_item}`)
+    if (fileInfo.file_itemtype == "Offerte" || fileInfo.file_itemtype == "Contract") {
+        let quotation;
+        if (fileInfo.file_itemtype == "Offerte") quotation = await rentmanGetFromEndpoint(`/quotes/${fileInfo.file_item}`)
+        if (fileInfo.file_itemtype == "Contract") quotation = await rentmanGetFromEndpoint(`/contracts/${fileInfo.file_item}`)
         const project = await rentmanGetFromEndpoint(quotation.project)
         let hubspotDeal;
         for (let i = 0; i < 3; i++) {
@@ -170,8 +172,10 @@ async function linkFileToDeal(event) {
             console.warn(`STOPPER → Fandt stadig ingen HubSpot ID for projekt ${project.id}`);
             return;
         }
-
-        const file = await hubspotUploadFile(fileLink, project.displayname)
+        let fileType;
+        if (fileInfo.file_itemtype == "Offerte") fileType = "Tilbud vedr."
+        if (fileInfo.file_itemtype == "Contract") fileType = "Ordrebekræftelse for"
+        const file = await hubspotUploadFile(fileLink, project.displayname, fileType)
         const status = await hubspotCheckFile(file.id)
 
         let fileId;
