@@ -57,13 +57,14 @@ async function rentmanGetFromEndpoint(endpoint, attempt = 1) {
     }
 }
 
-async function hubspotUploadFile(link) {
+async function hubspotUploadFile(link, projectName) {
     let url = `https://api.hubapi.com/files/v3/files/import-from-url/async`
 
     const body = {
         access: "PUBLIC_NOT_INDEXABLE",
         url: link,
-        folderId: "308627103977"
+        folderId: "308627103977",
+        name: `Tilbud vedr. ${projectName}`
     }
 
     const response = await fetch(url, {
@@ -170,7 +171,7 @@ async function linkFileToDeal(event) {
             return;
         }
 
-        const file = await hubspotUploadFile(fileLink)
+        const file = await hubspotUploadFile(fileLink, project.displayname)
         const status = await hubspotCheckFile(file.id)
 
         let fileId;

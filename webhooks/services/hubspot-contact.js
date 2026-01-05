@@ -267,8 +267,6 @@ async function handleHubSpotContactWebhook(events) {
                 // #########################
 
                 if (event.objectTypeId === "0-1") {
-                    console.log(`Trigger event: (0-1)`);
-                    console.log(event);
                     if (event.subscriptionType === "object.deletion") continue;
                     const contact = await hubspotGetFromEndpoint(event.objectTypeId, event.objectId, "?associations=companies")
                     if (event.subscriptionType === "object.creation") {
@@ -332,8 +330,6 @@ async function handleHubSpotContactWebhook(events) {
                     // #########################
 
                 } else if (event.objectTypeId === "0-2") {
-                    console.log(`Trigger event: (0-2)`);
-                    console.log(event);
                     if (event.subscriptionType === "object.deletion") continue;
 
                     const company = await hubspotGetFromEndpoint(event.objectTypeId, event.objectId, "?properties=cvrnummer,name&associations=contacts")
@@ -380,8 +376,6 @@ async function handleHubSpotContactWebhook(events) {
 
 
             } else { //alle associations
-                console.log(`Trigger event: (0-2)`);
-                console.log(event);
                 if (event.associationType === "CONTACT_TO_COMPANY" || event.associationType === "COMPANY_TO_CONTACT") {
 
                     const type = event.associationType.split("_TO_")
