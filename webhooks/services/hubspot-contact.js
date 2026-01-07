@@ -108,8 +108,8 @@ async function rentmanCreateContactPerson(data, companyRentmanId) {
         const [localPart, domainPart] = email.split('@');
         if (!/\.[a-zA-Z]{2,}$/.test(domainPart)) {
             email = `${localPart}@${domainPart}.dk`;
-            body.email = email
         }
+        body.email = email
     }
     console.log(`Opretter kontaktperson i Rentman under virksomhed ${companyRentmanId}: ${data.properties.firstname} ${data.properties.lastname}`);
 
@@ -406,8 +406,8 @@ async function handleHubSpotContactWebhook(events) {
                     const name = `${contact.properties.firstname || ""} ${contact.properties.lastname || ""}`;
 
                     // Valider at vi har både company og contact
-                    if (!company) {console.log(`Fandt ikke virksomhed i hubspot`); break;};
-                    if (!contact) {console.log(`Fandt ikke contactperson i hubspot`); break;};
+                    if (!company) break;
+                    if (!contact) break;
 
                     // Find company i database med retry logik
                     let dbCompany;
@@ -421,6 +421,7 @@ async function handleHubSpotContactWebhook(events) {
                     }
 
                     const rentmanCompany = dbCompany?.[0]?.rentman_id;
+                    const currentCompanyId = dbCompany?.[0]?.hubspot_id;
 
                     if (!rentmanCompany) {
                         console.log('STOPPER Fandt ingen company i Rentman.');
@@ -433,7 +434,7 @@ async function handleHubSpotContactWebhook(events) {
                     if (event.associationRemoved) {
                         // Find contact i database med retry logik
                         for (let i = 0; i < 3; i++) {
-                            [dbContacts] = await pool.query('SELECT * FROM synced_contacts WHERE hubspot_id = ?', [contact.id]);
+                            [dbContacts] = await pool.query('SELECT * FROM synced_contacts WHERE hubspot_id = ? AND hubspot_company_conntected = ?', [contact.id, currentCompanyId]);
 
                             if (dbContacts?.[0]) break;
 
@@ -450,9 +451,9 @@ async function handleHubSpotContactWebhook(events) {
 
                         // Slet contact hvis den er knyttet til den rigtige company
                         for (const sqlLine of dbContacts) {
-                            if (sqlLine.hubspot_company_conntected == event.toObjectId || sqlLine.hubspot_company_conntected == event.fromObjectId) {
+                            if (sqlLine.hubspot_company_conntected == currentCompanyId) {
                                 await rentmanDeleteContactPerson(rentmanContact);
-                                await pool.query('DELETE FROM synced_contacts WHERE hubspot_id = ?', [contact.id]);
+                                await pool.query('DELETE FROM synced_contacts WHERE hubspot_id = ? AND hubspot_company_conntected = ?', [contact.id, currentCompanyId]);
                                 console.log(`Slettede kontaktperson ${name}`);
                                 break;
                             }
@@ -460,41 +461,26 @@ async function handleHubSpotContactWebhook(events) {
                     }
                     // Håndter tilføjelse af association
                     else {
-                        // Dobbelttjek for dubletter med retry logik
+                        // Dobbelttjek for dubletter med retry logik - VIGTIGT: Flere retries for race conditions
                         for (let d = 0; d < 2; d++) {
-                            // Tjek om contact allerede eksisterer
+                            dublet = false; // Reset dublet for hver iteration
+
+                            // Tjek om contact allerede eksisterer på DENNE company
                             for (let i = 0; i < ranNum + amn; i++) {
-                                [dbContacts] = await pool.query('SELECT * FROM synced_contacts WHERE hubspot_id = ?', [contact.id]);
-                                console.log(`Tjekker dubletter`);
+                                [dbContacts] = await pool.query(
+                                    'SELECT * FROM synced_contacts WHERE hubspot_id = ? AND hubspot_company_conntected = ?',
+                                    [contact.id, currentCompanyId]
+                                );
+                                console.log(`Tjekker dubletter for contact ${contact.id} på company ${currentCompanyId}`);
 
                                 if (dbContacts?.[0]) {
-                                    console.log(`Fandt eksisterende contact med Hubspot ID ${contact.id}`);
+                                    console.log(`STOPPER - Fandt eksisterende contact på denne company`);
+                                    console.log(dbContacts[0]);
+                                    dublet = true;
                                     break;
                                 }
 
                                 await new Promise(r => setTimeout(r, 1000));
-                            }
-
-                            // Valider at kontakten ikke allerede er knyttet til denne company
-                            if (dbContacts?.[0]) {
-                                for (const rentmanContact of dbContacts) {
-                                    console.log(rentmanContact);
-
-                                    if (rentmanContact) {
-                                        const hubspotId = rentmanContact?.hubspot_company_conntected;
-                                        const fromId = event?.fromObjectId;
-                                        const toId = event?.toObjectId;
-
-                                        if (
-                                            hubspotId != null &&
-                                            (String(hubspotId) === String(fromId) || String(hubspotId) === String(toId))
-                                        ) {
-                                            console.log('STOPPER kontaktpersonen findes allerede.');
-                                            dublet = true;
-                                            break;
-                                        }
-                                    }
-                                }
                             }
 
                             if (dublet) break;
@@ -502,23 +488,35 @@ async function handleHubSpotContactWebhook(events) {
                             await new Promise(r => setTimeout(r, waitTime));
                         }
 
-                        // Hvis ingen dublet, opret ny kontaktperson
+                        // Hvis dublet fundet, stop her
                         if (dublet) break;
 
-                        console.log(`Ingen dubletter`);
+                        console.log(`Ingen dubletter - opretter kontaktperson på company ${currentCompanyId}`);
                         const rentmanId = await rentmanCreateContactPerson(contact, rentmanCompany);
+
+                        // KRITISK: Tjek ÉN GANG TIL efter Rentman oprettelse men FØR database insert
+                        [dbContacts] = await pool.query(
+                            'SELECT * FROM synced_contacts WHERE hubspot_id = ? AND hubspot_company_conntected = ?',
+                            [contact.id, currentCompanyId]
+                        );
+
+                        if (dbContacts?.[0]) {
+                            console.log(`RACE CONDITION OPDAGET - En anden process har allerede oprettet denne kontakt. Sletter Rentman contact ${rentmanId.id}`);
+                            await rentmanDeleteContactPerson({ rentman_id: rentmanId.id });
+                            break;
+                        }
+
                         triggers.push(`${amn}: ASSOCIATIONS createContactPerson (SUCCESFULD)`);
                         triggers.push(event);
 
                         await pool.query(
-                            'INSERT INTO synced_contacts (name, rentman_id, hubspot_id, hubspot_company_conntected) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE name=VALUES(name), hubspot_id=VALUES(hubspot_id)',
-                            [name, rentmanId.id, contact.id, dbCompany?.[0]?.hubspot_id]
+                            'INSERT INTO synced_contacts (name, rentman_id, hubspot_id, hubspot_company_conntected) VALUES (?, ?, ?, ?)',
+                            [name, rentmanId.id, contact.id, currentCompanyId]
                         );
 
-                        console.log(`Oprettede kontaktperson ${name}`);
+                        console.log(`Oprettede kontaktperson ${name} med Rentman ID ${rentmanId.id}`);
                     }
                 }
-
             }
 
 
