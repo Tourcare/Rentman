@@ -100,18 +100,17 @@ async function rentmanCreateContactPerson(data, companyRentmanId) {
     let email = data.properties.email ? data.properties.email.trim().replace(/\s+/g, '') : null;
 
 
-    if (email) {
-        const [localPart, domainPart] = email.split('@');
-        if (!/\.[a-zA-Z]{2,}$/.test(domainPart)) {
-            email = `${localPart}@${domainPart}.dk`;
-        }
-    }
-
     const body = {
         firstname: data.properties.firstname || '',
         lastname: data.properties.lastname || '',
     };
-    body.email = email
+    if (email) {
+        const [localPart, domainPart] = email.split('@');
+        if (!/\.[a-zA-Z]{2,}$/.test(domainPart)) {
+            email = `${localPart}@${domainPart}.dk`;
+            body.email = email
+        }
+    }
     console.log(`Opretter kontaktperson i Rentman under virksomhed ${companyRentmanId}: ${data.properties.firstname} ${data.properties.lastname}`);
 
     const response = await fetch(url, {
