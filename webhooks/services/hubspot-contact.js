@@ -406,8 +406,8 @@ async function handleHubSpotContactWebhook(events) {
                     const name = `${contact.properties.firstname || ""} ${contact.properties.lastname || ""}`;
 
                     // Valider at vi har både company og contact
-                    if (!company) break;
-                    if (!contact) break;
+                    if (!company) {console.log(`Fandt ikke virksomhed i hubspot`); break;};
+                    if (!contact) {console.log(`Fandt ikke contactperson i hubspot`); break;};
 
                     // Find company i database med retry logik
                     let dbCompany;
@@ -450,7 +450,7 @@ async function handleHubSpotContactWebhook(events) {
 
                         // Slet contact hvis den er knyttet til den rigtige company
                         for (const sqlLine of dbContacts) {
-                            if (sqlLine.hubspot_company_contected == event.toObjectId || sqlLine.hubspot_company_contected == event.fromObjectId) {
+                            if (sqlLine.hubspot_company_conntected == event.toObjectId || sqlLine.hubspot_company_conntected == event.fromObjectId) {
                                 await rentmanDeleteContactPerson(rentmanContact);
                                 await pool.query('DELETE FROM synced_contacts WHERE hubspot_id = ?', [contact.id]);
                                 console.log(`Slettede kontaktperson ${name}`);
@@ -481,7 +481,7 @@ async function handleHubSpotContactWebhook(events) {
                                     console.log(rentmanContact);
 
                                     if (rentmanContact) {
-                                        const hubspotId = rentmanContact?.hubspot_company_contected;
+                                        const hubspotId = rentmanContact?.hubspot_company_conntected;
                                         const fromId = event?.fromObjectId;
                                         const toId = event?.toObjectId;
 
@@ -511,7 +511,7 @@ async function handleHubSpotContactWebhook(events) {
                         triggers.push(event);
 
                         await pool.query(
-                            'INSERT INTO synced_contacts (name, rentman_id, hubspot_id, hubspot_company_contected) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE name=VALUES(name), hubspot_id=VALUES(hubspot_id)',
+                            'INSERT INTO synced_contacts (name, rentman_id, hubspot_id, hubspot_company_conntected) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE name=VALUES(name), hubspot_id=VALUES(hubspot_id)',
                             [name, rentmanId.id, contact.id, dbCompany?.[0]?.hubspot_id]
                         );
 
