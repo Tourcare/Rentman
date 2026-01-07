@@ -253,7 +253,7 @@ async function handleHubSpotContactWebhook(events) {
     console.log(`Behandler ${events.length} events fra HubSpot webhook`);
     const ranNum = Math.floor(Math.random() * 2) + 1;
     let amn = 0
-    let triggers =[]
+    let triggers = []
     try {
 
         for (const event of events) {
@@ -273,7 +273,7 @@ async function handleHubSpotContactWebhook(events) {
                     if (event.subscriptionType === "object.deletion") continue;
                     const contact = await hubspotGetFromEndpoint(event.objectTypeId, event.objectId, "?associations=companies")
                     if (event.subscriptionType === "object.creation") {
-                        
+
                         if (!contact?.associations?.companies) {
                             console.log('Fandt ingen tilknyttet virksomed');
                             continue;
@@ -388,115 +388,136 @@ async function handleHubSpotContactWebhook(events) {
 
 
             } else { //alle associations
-                let dublet
-                if (event.associationType === "CONTACT_TO_COMPANY" || event.associationType === "COMPANY_TO_CONTACT") {
+                let dublet = false;
 
-                    const type = event.associationType.split("_TO_")
+                if (event.associationType === "CONTACT_TO_COMPANY" || event.associationType === "COMPANY_TO_CONTACT") {
+                    const type = event.associationType.split("_TO_");
                     let company;
                     let contact;
 
+                    // Hent company og contact baseret på association retning
                     if (type[0] === "CONTACT") {
-                        company = await hubspotGetFromEndpoint("0-2", event.toObjectId, "?properties=cvrnummer,name&associations=contacts")
-                        contact = await hubspotGetFromEndpoint("0-1", event.fromObjectId, "?associations=companies")
-
+                        company = await hubspotGetFromEndpoint("0-2", event.toObjectId, "?properties=cvrnummer,name&associations=contacts");
+                        contact = await hubspotGetFromEndpoint("0-1", event.fromObjectId, "?associations=companies");
                     } else if (type[0] === "COMPANY") {
-                        company = await hubspotGetFromEndpoint("0-2", event.fromObjectId, "?properties=cvrnummer,name&associations=contacts")
-                        contact = await hubspotGetFromEndpoint("0-1", event.toObjectId, "?associations=companies")
+                        company = await hubspotGetFromEndpoint("0-2", event.fromObjectId, "?properties=cvrnummer,name&associations=contacts");
+                        contact = await hubspotGetFromEndpoint("0-1", event.toObjectId, "?associations=companies");
                     }
-                    const name = `${contact.properties.firstname || ""} ${contact.properties.lastname || ""}`
 
+                    const name = `${contact.properties.firstname || ""} ${contact.properties.lastname || ""}`;
+
+                    // Valider at vi har både company og contact
                     if (!company) break;
                     if (!contact) break;
-                    // FINDER COMPANY I DB
+
+                    // Find company i database med retry logik
+                    let dbCompany;
                     for (let i = 0; i < ranNum; i++) {
-                        [dbCompany] = await pool.query('SELECT * FROM synced_companies WHERE hubspot_id = ?', [company.id])
+                        [dbCompany] = await pool.query('SELECT * FROM synced_companies WHERE hubspot_id = ?', [company.id]);
 
                         if (dbCompany?.[0]) break;
 
-                        console.log(`Fandt ingen contact med Hubspot ID ${company.id}. Prøver igen.`);
-                        await new Promise(r => setTimeout(r, 3000)); // vent 3 sek
+                        console.log(`Fandt ingen company med Hubspot ID ${company.id}. Prøver igen.`);
+                        await new Promise(r => setTimeout(r, 3000));
                     }
-                    const rentmanCompany = dbCompany?.[0]?.rentman_id
+
+                    const rentmanCompany = dbCompany?.[0]?.rentman_id;
 
                     if (!rentmanCompany) {
                         console.log('STOPPER Fandt ingen company i Rentman.');
-                        dublet = true
                         break;
                     }
-                    let dbContacts;
-                    if (event.associationRemoved) {
 
+                    let dbContacts;
+
+                    // Håndter fjernelse af association
+                    if (event.associationRemoved) {
+                        // Find contact i database med retry logik
                         for (let i = 0; i < 3; i++) {
-                            [dbContacts] = await pool.query('SELECT * FROM synced_contacts WHERE hubspot_id = ?', [contact.id])
+                            [dbContacts] = await pool.query('SELECT * FROM synced_contacts WHERE hubspot_id = ?', [contact.id]);
 
                             if (dbContacts?.[0]) break;
 
                             console.log(`Fandt ingen contact med Hubspot ID ${contact.id}. Prøver igen.`);
-                            await new Promise(r => setTimeout(r, 3000)); // vent 3 sek
+                            await new Promise(r => setTimeout(r, 3000));
                         }
-                        const rentmanContact = dbContacts
-                        if (!rentmanContact) {
+
+                        const rentmanContact = dbContacts;
+
+                        if (!rentmanContact || !rentmanContact[0]) {
                             console.log('STOPPER Fandt ingen contact i Rentman.');
-                            dublet = true
                             break;
                         }
+
+                        // Slet contact hvis den er knyttet til den rigtige company
                         for (const sqlLine of dbContacts) {
-                            if (sqlLine.hubspot_company_contected == event.toObjectId) {
-                                await rentmanDeleteContactPerson(rentmanContact)
-                                await pool.query(
-                                    'DELETE FROM synced_contacts WHERE hubspot_id = ?', [contact.id]
-                                )
+                            if (sqlLine.hubspot_company_contected == event.toObjectId || sqlLine.hubspot_company_contected == event.fromObjectId) {
+                                await rentmanDeleteContactPerson(rentmanContact);
+                                await pool.query('DELETE FROM synced_contacts WHERE hubspot_id = ?', [contact.id]);
                                 console.log(`Slettede kontaktperson ${name}`);
-                                dublet = true
                                 break;
                             }
                         }
-
-
-                    } else {
+                    }
+                    // Håndter tilføjelse af association
+                    else {
+                        // Dobbelttjek for dubletter med retry logik
                         for (let d = 0; d < 2; d++) {
+                            // Tjek om contact allerede eksisterer
                             for (let i = 0; i < ranNum + amn; i++) {
-                                [dbContacts] = await pool.query('SELECT * FROM synced_contacts WHERE hubspot_id = ?', [contact.id])
-                                console.log(`Tjekker dubeletter`);
+                                [dbContacts] = await pool.query('SELECT * FROM synced_contacts WHERE hubspot_id = ?', [contact.id]);
+                                console.log(`Tjekker dubletter`);
 
                                 if (dbContacts?.[0]) {
-                                    dublet = true
+                                    console.log(`Fandt eksisterende contact med Hubspot ID ${contact.id}`);
                                     break;
                                 }
-                                // vent 1 sek
-                            }
-                            for (const rentmanContact of dbContacts) {
-                                console.log(rentmanContact);
 
-                                if (rentmanContact) {
-                                    const hubspotId = rentmanContact?.hubspot_company_conntected;
-                                    const fromId = event?.fromObjectId;
-                                    const toId = event?.toObjectId;
-                                    if (
-                                        hubspotId != null &&
-                                        (String(hubspotId) == String(fromId) || String(hubspotId) == String(toId))
-                                    ) {
-                                        console.log('STOPPER kontaktpersonen findes allerede.');
-                                        dublet = true;
-                                        break;
+                                await new Promise(r => setTimeout(r, 1000));
+                            }
+
+                            // Valider at kontakten ikke allerede er knyttet til denne company
+                            if (dbContacts?.[0]) {
+                                for (const rentmanContact of dbContacts) {
+                                    console.log(rentmanContact);
+
+                                    if (rentmanContact) {
+                                        const hubspotId = rentmanContact?.hubspot_company_contected;
+                                        const fromId = event?.fromObjectId;
+                                        const toId = event?.toObjectId;
+
+                                        if (
+                                            hubspotId != null &&
+                                            (String(hubspotId) === String(fromId) || String(hubspotId) === String(toId))
+                                        ) {
+                                            console.log('STOPPER kontaktpersonen findes allerede.');
+                                            dublet = true;
+                                            break;
+                                        }
                                     }
                                 }
                             }
-                            await new Promise(r => setTimeout(r, waitTime))
+
+                            if (dublet) break;
+
+                            await new Promise(r => setTimeout(r, waitTime));
                         }
+
+                        // Hvis ingen dublet, opret ny kontaktperson
                         if (dublet) break;
+
                         console.log(`Ingen dubletter`);
-                        const rentmanId = await rentmanCreateContactPerson(contact, rentmanCompany)
-                        triggers.push(`${amn}: ASSOCIATIONS createContactPerson (SUCCESFULD)`)
-                        triggers.push(event)
+                        const rentmanId = await rentmanCreateContactPerson(contact, rentmanCompany);
+                        triggers.push(`${amn}: ASSOCIATIONS createContactPerson (SUCCESFULD)`);
+                        triggers.push(event);
+
                         await pool.query(
-                            'INSERT INTO synced_contacts (name, rentman_id, hubspot_id, hubspot_company_conntected) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE name=VALUES(name), hubspot_id=VALUES(hubspot_id)',
+                            'INSERT INTO synced_contacts (name, rentman_id, hubspot_id, hubspot_company_contected) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE name=VALUES(name), hubspot_id=VALUES(hubspot_id)',
                             [name, rentmanId.id, contact.id, dbCompany?.[0]?.hubspot_id]
                         );
-                        console.log(`Oprettede kontaktperson ${name}`);
-                        break;
-                    }
 
+                        console.log(`Oprettede kontaktperson ${name}`);
+                    }
                 }
 
             }
@@ -504,7 +525,7 @@ async function handleHubSpotContactWebhook(events) {
 
         }
         console.log(`Trigger events:`)
-        triggers.forEach((trigger) => {console.log(trigger)})
+        triggers.forEach((trigger) => { console.log(trigger) })
 
     } catch (err) {
         console.log(err);
