@@ -253,10 +253,13 @@ async function handleHubSpotContactWebhook(events) {
     console.log(`Behandler ${events.length} events fra HubSpot webhook`);
     const ranNum = Math.floor(Math.random() * 2) + 1;
     let amn = 0
+    let triggers =[]
     try {
 
         for (const event of events) {
             amn++
+            console.log(`Trigger Event:`)
+            console.log(event)
             const waitTime = Math.floor(Math.random() * (2000 - 500 + 1)) + 500;
             await new Promise(r => setTimeout(r, waitTime))
             if (event.changeSource === "OBJECT_MERGE") break;
@@ -270,6 +273,7 @@ async function handleHubSpotContactWebhook(events) {
                     if (event.subscriptionType === "object.deletion") continue;
                     const contact = await hubspotGetFromEndpoint(event.objectTypeId, event.objectId, "?associations=companies")
                     if (event.subscriptionType === "object.creation") {
+                        
                         if (!contact?.associations?.companies) {
                             console.log('Fandt ingen tilknyttet virksomed');
                             continue;
@@ -296,6 +300,8 @@ async function handleHubSpotContactWebhook(events) {
                             break;
                         }
                         const rentmanId = await rentmanCreateContactPerson(contact, rentmanCompany)
+                        triggers.push(`${amn}: 01(contact) = object.creation (SUCCESFULD)`)
+                        triggers.push(event)
                         const name = `${contact.properties.firstname || ""} ${contact.properties.lastname || ""}`
                         await pool.query(
                             'INSERT INTO synced_contacts (name, rentman_id, hubspot_id, hubspot_company_conntected) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE name=VALUES(name), hubspot_id=VALUES(hubspot_id)',
@@ -320,6 +326,8 @@ async function handleHubSpotContactWebhook(events) {
                             break;
                         }
                         await rentmanUpdateContactPerson(rentmanContact, contact)
+                        triggers.push(`${amn}: 01(contact) = object.propertyChange (SUCCESFULD)`)
+                        triggers.push(event)
                         const name = `${contact.properties.firstname || ""} ${contact.properties.lastname || ""}`
                         console.log('Opdateret kontaktperson: ' + name);
                     }
@@ -338,6 +346,8 @@ async function handleHubSpotContactWebhook(events) {
 
 
                         const rentmanId = await rentmanCreateCompany(company)
+                        triggers.push(`${amn}: 02(company) = object.creation (SUCCESFULD)`)
+                        triggers.push(event)
                         await pool.query(
                             'INSERT INTO synced_companies (name, rentman_id, hubspot_id) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE name=VALUES(name), hubspot_id=VALUES(hubspot_id)',
                             [company.properties.name, rentmanId.id, company.id]
@@ -363,6 +373,8 @@ async function handleHubSpotContactWebhook(events) {
                             break;
                         }
                         await rentmanUpdateCompany(rentmanCompany, company)
+                        triggers.push(`${amn}: 02(company) = object.propertyChange (SUCCESFULD)`)
+                        triggers.push(event)
                         await pool.query(
                             'UPDATE synced_companies SET name = ? WHERE hubspot_id = ?', [company.properties.name, company.id]
                         )
@@ -376,6 +388,7 @@ async function handleHubSpotContactWebhook(events) {
 
 
             } else { //alle associations
+                let dublet
                 if (event.associationType === "CONTACT_TO_COMPANY" || event.associationType === "COMPANY_TO_CONTACT") {
 
                     const type = event.associationType.split("_TO_")
@@ -407,6 +420,7 @@ async function handleHubSpotContactWebhook(events) {
 
                     if (!rentmanCompany) {
                         console.log('STOPPER Fandt ingen company i Rentman.');
+                        dublet = true
                         break;
                     }
                     let dbContacts;
@@ -423,6 +437,7 @@ async function handleHubSpotContactWebhook(events) {
                         const rentmanContact = dbContacts
                         if (!rentmanContact) {
                             console.log('STOPPER Fandt ingen contact i Rentman.');
+                            dublet = true
                             break;
                         }
                         for (const sqlLine of dbContacts) {
@@ -432,19 +447,22 @@ async function handleHubSpotContactWebhook(events) {
                                     'DELETE FROM synced_contacts WHERE hubspot_id = ?', [contact.id]
                                 )
                                 console.log(`Slettede kontaktperson ${name}`);
+                                dublet = true
                                 break;
                             }
                         }
 
 
                     } else {
-                        let dublet
                         for (let d = 0; d < 2; d++) {
                             for (let i = 0; i < ranNum + amn; i++) {
                                 [dbContacts] = await pool.query('SELECT * FROM synced_contacts WHERE hubspot_id = ?', [contact.id])
                                 console.log(`Tjekker dubeletter`);
 
-                                if (dbContacts?.[0]) break;
+                                if (dbContacts?.[0]) {
+                                    dublet = true
+                                    break;
+                                }
                                 // vent 1 sek
                             }
                             for (const rentmanContact of dbContacts) {
@@ -469,6 +487,8 @@ async function handleHubSpotContactWebhook(events) {
                         if (dublet) break;
                         console.log(`Ingen dubletter`);
                         const rentmanId = await rentmanCreateContactPerson(contact, rentmanCompany)
+                        triggers.push(`${amn}: ASSOCIATIONS createContactPerson (SUCCESFULD)`)
+                        triggers.push(event)
                         await pool.query(
                             'INSERT INTO synced_contacts (name, rentman_id, hubspot_id, hubspot_company_conntected) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE name=VALUES(name), hubspot_id=VALUES(hubspot_id)',
                             [name, rentmanId.id, contact.id, dbCompany?.[0]?.hubspot_id]
@@ -483,6 +503,8 @@ async function handleHubSpotContactWebhook(events) {
 
 
         }
+        console.log(`Trigger events:`)
+        triggers.forEach((trigger) => {console.log(trigger)})
 
     } catch (err) {
         console.log(err);
