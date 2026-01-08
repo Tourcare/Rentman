@@ -1,4 +1,11 @@
-const pool = require('../../db');
+const dbConfig = {
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DASH_DB_NAME,
+};
+
+const pool = mysql.createPool(dbConfig);
 
 // Rentman API konfiguration
 const RENTMAN_API_BASE = "https://api.rentman.net";
