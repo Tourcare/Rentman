@@ -9,6 +9,7 @@ const { createOrders, updateOrders, deleteOrder } = require("../services/rentman
 const { createContact, updateContact, deleteContact } = require("../services/rentman-update-contact");
 const { linkFileToDeal } = require("../services/rentman-quotation-files");
 const { newUpdateOnEquipment } = require("../services/rentman-cost-update");
+const { handleWebhook } = require("../services/rentman-update-db");
 
 const router = express.Router();
 router.use(express.json());
@@ -46,6 +47,7 @@ router.post("/", async (req, res) => {
             }
 
         } if (event?.itemType === "Subproject") {
+            handleWebhook(event)
             if (event.eventType === "create") {
                 createOrders(event)
 
