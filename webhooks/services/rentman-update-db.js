@@ -1,4 +1,4 @@
-
+const dotenv = require('dotenv');
 const mysql = require('mysql2/promise');
 
 const dbConfig = {
@@ -9,6 +9,10 @@ const dbConfig = {
 };
 
 const pool = mysql.createPool(dbConfig);
+
+// Rentman API konfiguration
+const RENTMAN_API_BASE = "https://api.rentman.net";
+const RENTMAN_API_TOKEN = process.env.RENTMAN_ACCESS_TOKEN;
 
 /**
  * Henter subproject data fra Rentman API
