@@ -106,7 +106,7 @@ async function rentmanPostRentalRequest(data, contact) {
             d.setDate(d.getDate() - 1);
         } while (d.getDay() === 0 || d.getDay() === 6);
 
-        d.setHours(14, 0, 0, 0); // 14:00
+        d.setHours(13, 0, 0, 0); // 14:00
         return d;
     }
 
@@ -116,7 +116,7 @@ async function rentmanPostRentalRequest(data, contact) {
             d.setDate(d.getDate() + 1);
         } while (d.getDay() === 0 || d.getDay() === 6);
 
-        d.setHours(12, 0, 0, 0); // 12:00
+        d.setHours(11, 0, 0, 0); // 12:00
         return d;
     }
 
