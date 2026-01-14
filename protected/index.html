@@ -1,66 +1,319 @@
 <!DOCTYPE html>
 <html lang="da">
-
 <head>
     <meta charset="UTF-8">
-    <title>Tourcare Access</title>
-    <link rel="stylesheet" href="/style.css">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,100..900;1,100..900&display=swap"
-        rel="stylesheet">
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tourcare Email Signatur Generator</title>
+    <style>
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            max-width: 900px;
+            width: 100%;
+            padding: 40px;
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+        
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+        
+        .form-group {
+            margin-bottom: 25px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        
+        select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 16px;
+            background: white;
+            cursor: pointer;
+            transition: border-color 0.3s;
+        }
+        
+        select:hover {
+            border-color: #667eea;
+        }
+        
+        select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .preview-section {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+        }
+        
+        .preview-title {
+            font-weight: 600;
+            margin-bottom: 15px;
+            color: #333;
+            font-size: 16px;
+        }
+        
+        .signature-preview {
+            background: white;
+            padding: 20px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            border: 1px solid #ddd;
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        
+        button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            flex: 1;
+            min-width: 150px;
+        }
+        
+        .copy-btn {
+            background: #667eea;
+            color: white;
+        }
+        
+        .copy-btn:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        
+        .copy-btn.copied {
+            background: #10b981;
+        }
+        
+        .download-btn {
+            background: #764ba2;
+            color: white;
+        }
+        
+        .download-btn:hover {
+            background: #653a8a;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(118, 75, 162, 0.4);
+        }
+        
+        .success-message {
+            display: none;
+            padding: 12px;
+            background: #10b981;
+            color: white;
+            border-radius: 6px;
+            margin-top: 10px;
+            font-size: 14px;
+            text-align: center;
+        }
+        
+        .success-message.show {
+            display: block;
+            animation: slideIn 0.3s ease;
+        }
+        
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        @media (max-width: 600px) {
+            .container {
+                padding: 20px;
+            }
+            
+            h1 {
+                font-size: 24px;
+            }
+            
+            button {
+                min-width: 100%;
+            }
+        }
+    </style>
 </head>
-
 <body>
-
-    <div class="image-side">
-        <div class="user-info">
-            <h1>STATUS</h1>
-            <div class="user-status">
-                <ul id="user-list">
-                </ul>
+    <div class="container">
+        <h1>📧 Tourcare Email Signatur Generator</h1>
+        <p class="subtitle">Vælg din profil og generer din email signatur</p>
+        
+        <div class="form-group">
+            <label for="employee">Vælg medarbejder:</label>
+            <select id="employee">
+                <option value="">-- Vælg en medarbejder --</option>
+            </select>
+        </div>
+        
+        <div class="preview-section" id="previewSection" style="display: none;">
+            <div class="preview-title">📋 Preview af signatur:</div>
+            <div class="signature-preview" id="signaturePreview"></div>
+            
+            <div class="button-group">
+                <button class="copy-btn" id="copyBtn">Kopier HTML</button>
+                <button class="download-btn" id="downloadBtn">Download HTML fil</button>
+            </div>
+            
+            <div class="success-message" id="successMessage">
+                ✓ HTML kopieret til udklipsholder!
             </div>
         </div>
     </div>
 
-    <div class="sync-side">
+    <script>
+        const employees = [
+            {"id":"1","navn":"Ali Tawfik","Fornavn":"Ali","Efternavn":"Tawfik","e_mail":"ali@tourcare.dk","job_title":"Lager","telefon":"+45 4277 4728"},
+            {"id":"2","navn":"Carl Nilsson","Fornavn":"Carl","Efternavn":"Nilsson","e_mail":"carl@tourcare.dk","job_title":"Projektleder","telefon":"+45 2364 7054"},
+            {"id":"3","navn":"Carl-Emil Larsen","Fornavn":"Carl-Emil","Efternavn":"Larsen","e_mail":"ce@tourcare.dk","job_title":"Lager","telefon":"+45 2991 0297"},
+            {"id":"4","navn":"Emil Pallisgaard-Andersen","Fornavn":"Emil","Efternavn":"Pallisgaard-Andersen","e_mail":"emil@tourcare.dk","job_title":"Projektleder","telefon":"+45 2570 2233"},
+            {"id":"5","navn":"Freja Malou Sundberg Olsen","Fornavn":"Freja Malou","Efternavn":"Sundberg Olsen","e_mail":"freja@tourcare.dk","job_title":"","telefon":""},
+            {"id":"6","navn":"Henrik Skygge Rønne","Fornavn":"Henrik","Efternavn":"Skygge Rønne","e_mail":"henrik@ranmix.dk","job_title":"","telefon":""},
+            {"id":"7","navn":"Jeppe Becker","Fornavn":"Jeppe","Efternavn":"Becker","e_mail":"jeppe@tourcare.dk","job_title":"","telefon":"+4560487899"},
+            {"id":"8","navn":"Lars Madsen","Fornavn":"Lars","Efternavn":"Madsen","e_mail":"lars@tourcare.dk","job_title":"Lager","telefon":"+45 3136 8334"},
+            {"id":"9","navn":"Loa Katrine Nissen","Fornavn":"Loa Katrine","Efternavn":"Nissen","e_mail":"loa@tourcare.dk","job_title":"Administration","telefon":"+45 5191 0051"},
+            {"id":"10","navn":"Lucas Kastrup","Fornavn":"Lucas","Efternavn":"Kastrup","e_mail":"lucas@ranmix.dk","job_title":"Direktør","telefon":"+45 3227 6870"},
+            {"id":"11","navn":"Peer Kastrup","Fornavn":"Peer","Efternavn":"Kastrup","e_mail":"mail@ranmix.dk","job_title":"","telefon":"+4526859804"},
+            {"id":"12","navn":"Morten Riis","Fornavn":"Morten","Efternavn":"Riis","e_mail":"morten@tourcare.dk","job_title":"Projektleder","telefon":"+45 2546 6656"},
+            {"id":"13","navn":"Booking Tourcare","Fornavn":"Booking","Efternavn":"Tourcare","e_mail":"produktion@tourcare.dk","job_title":"","telefon":""},
+            {"id":"14","navn":"Sofus Ellegaard","Fornavn":"Sofus","Efternavn":"Ellegaard","e_mail":"sofus@tourcare.dk","job_title":"Lager","telefon":"+45 5040 7380"},
+            {"id":"15","navn":"Sylvester Erbs Ledet","Fornavn":"Sylvester","Efternavn":"Erbs Ledet","e_mail":"sylvester@tourcare.dk","job_title":"Drift & Administration","telefon":"+45 5168 6106"},
+            {"id":"16","navn":"Theo Henckel","Fornavn":"Theo","Efternavn":"Henckel","e_mail":"theo@tourcare.dk","job_title":"Projektleder","telefon":"+45 5362 1309"},
+            {"id":"17","navn":"Thomas Elvius","Fornavn":"Thomas","Efternavn":"Elvius","e_mail":"thomas@tourcare.dk","job_title":"","telefon":"28769093"},
+            {"id":"18","navn":"Thor Friis","Fornavn":"Thor","Efternavn":"Friis","e_mail":"thor@tourcare.dk","job_title":"Daglig Leder","telefon":"+45 2970 9062"}
+        ];
 
-        <div class="sync-wrapper">
-            <h1>Integration Indstillinger</h1>
-            <div id="loggedInUser"></div>
-        </div>
+        const selectEl = document.getElementById('employee');
+        const previewSection = document.getElementById('previewSection');
+        const signaturePreview = document.getElementById('signaturePreview');
+        const copyBtn = document.getElementById('copyBtn');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const successMessage = document.getElementById('successMessage');
 
-        <div class="sync-container">
-            <div class="sync-type">
-                <h1>Sync projecter og subprojecter</h1>
-                <div class="button-wrapper">
-                    <button id="syncProjectAndSubBtn">Start Sync</button>
-                </div>
-            </div>
+        employees.forEach(emp => {
+            const option = document.createElement('option');
+            option.value = emp.id;
+            option.textContent = `${emp.navn}${emp.job_title ? ' - ' + emp.job_title : ''}`;
+            selectEl.appendChild(option);
+        });
 
-            <div class="sync-type">
-                <h1>Sync virksomheder og kontakter</h1>
-                <div class="button-wrapper">
-                    <button id="syncCompanyAndContacts">Start Sync</button>
-                </div>
-            </div>
+        function generateSignature(employee) {
+            const jobTitle = employee.job_title || '';
+            const phone = employee.telefon || '';
+            
+            return `<br />
+<span style="font-size:10pt;"><span style="color:#000000;"><span style="font-family:arial,helvetica,sans-serif;">Bedste hilsner / Kind regards</span></span></span>
+<table border="0" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-top:5px;">
+	<tbody>
+		<tr>
+			<td style="padding-right:12px;"><a href="https://tourcare.dk"><img alt="" border="0" height="108" src="https://app-eu.xink.io/Images/Get/E19661/t.png" style="display:block;" width="108" /></a></td>
+			<td style="border-left:1px solid #000;margin-left:8px;">&nbsp;</td>
+			<td style="padding-left:8px; font-family:Arial, sans-serif; color:#000;"><span style="color:#000000;"><span style="font-size:12pt;"><strong>${employee.navn}</strong>&nbsp;</span>|<span style="font-size:10pt;">&nbsp;</span><span style="font-size:11pt;"><span style="font-size:10pt;">${jobTitle}</span></span><br />
+			<span style="font-size:9pt;">${employee.e_mail}${phone ? ' | telefon ' + phone : ''}<br />
+			Kontor: +45 3227 6666</span><br />
+			<br />
+			<span style="font-size:8pt;">Høffdingsvej 32A, 2500 Valby | DK-40697934<br />
+			<a href="http://tourcare.dk" target="_blank">hjemmeside</a>&nbsp;(NY) | <a href="https://www.instagram.com/tourcaredk/" target="_blank">instagram</a> | <a href="https://dk.linkedin.com/company/tourcaredk" target="_blank">linkedin</a> </span> </span></td>
+		</tr>
+	</tbody>
+</table>`;
+        }
 
-            <div class="sync-type">
-                <h1>Sync project information</h1>
-                <div class="button-wrapper">
-                    <button id="crossCheckData">Start Sync</button>
-                </div>
-            </div>
+        selectEl.addEventListener('change', function() {
+            const employeeId = this.value;
+            if (employeeId) {
+                const employee = employees.find(e => e.id === employeeId);
+                const signature = generateSignature(employee);
+                
+                signaturePreview.innerHTML = signature;
+                previewSection.style.display = 'block';
+            } else {
+                previewSection.style.display = 'none';
+            }
+        });
 
-        </div>
+        copyBtn.addEventListener('click', function() {
+            const signature = signaturePreview.innerHTML;
+            
+            navigator.clipboard.writeText(signature).then(() => {
+                copyBtn.classList.add('copied');
+                copyBtn.textContent = '✓ Kopieret!';
+                successMessage.classList.add('show');
+                
+                setTimeout(() => {
+                    copyBtn.classList.remove('copied');
+                    copyBtn.textContent = 'Kopier HTML';
+                    successMessage.classList.remove('show');
+                }, 2000);
+            });
+        });
 
-        <div class="text-wrapper">
-            <p>Sync af HubSpot og Rentman Integration må IKKE udføres på to gangen oveni hinanden! Hvis siden lukkes midt i en sync, skal der ventes min. 10 minutter, før en ny sync påbegyndes.<br><br>Alle fejl skal rapporteres til Sylvester</p>
-        </div>
-    </div>
-
-    <script src="/app.js"></script>
+        downloadBtn.addEventListener('click', function() {
+            const signature = signaturePreview.innerHTML;
+            const blob = new Blob([signature], { type: 'text/html' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            
+            const employeeId = selectEl.value;
+            const employee = employees.find(e => e.id === employeeId);
+            a.download = `${employee.navn.replace(/\s+/g, '_')}_signatur.html`;
+            
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        });
+    </script>
 </body>
-
 </html>
