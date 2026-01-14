@@ -17,12 +17,7 @@ router.use(express.json());
 
 router.post("/", async (req, res) => {
     const event = req.body;
-    console.log(event)
-    event.items.forEach(element => {
-        console.log(element);
-        console.log(element.parent); 
-    });
-        
+    //console.log(event)
     res.status(200).send("OK");
     if (event?.user?.id === 235) {
         console.log('Kald fra integration')

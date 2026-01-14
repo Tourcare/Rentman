@@ -79,7 +79,7 @@ router.post("/", async (req, res) => {
     }
 
     // Håndter contact events (companies og contacts)
-    console.log(events);
+    //console.log(events);
     
     let contactEvents;
     contactEvents = contactEvents = events.filter(event => event.objectTypeId === "0-1" || event.objectTypeId === "0-2");

@@ -43,7 +43,7 @@ async function hubspotGetDealInfo(deal) {
 }
 
 const dealStageMap = {
-    "937ea84d-0a4f-4dcf-9028-3f9c2aafbf03": "Afventer Kunde",
+    "937ea84d-0a4f-4dcf-9028-3f9c2aafbf03": "Afventer kunde",
     "3725360f-519b-4b18-a593-494d60a29c9f": "Aflyst",
     "aa99e8d0-c1d5-4071-b915-d240bbb1aed9": "Bekræftet",
     "3852081363": "Afsluttet",
@@ -69,7 +69,7 @@ const setStageMap = {
 async function updateHubSpotDealStatus(deal) {
     const project = await hubspotGetDealInfo(deal);
 
-    const priority = ["Skal faktureres", "Bekræftet", "Faktureret", "Afsluttet", "Afventer Kunde", "Koncept", "Aflyst"]
+    const priority = ["Skal faktureres", "Bekræftet", "Faktureret", "Afsluttet", "Afventer kunde", "Koncept", "Aflyst"]
     const associations = project.associations?.orders?.results
 
     if (associations) {
