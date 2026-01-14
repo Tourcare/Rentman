@@ -171,6 +171,7 @@ async function hubspotCreateDeal(deal, company, contact) {
             amount: total_price,
             start_planning_period: plannedStart,
             slut_planning_period: plannedEnd,
+            rentman_database_id: deal.number
         },
         createdAt: createDate,
         associations: []
@@ -368,7 +369,8 @@ async function hubspotUpdateDeal(id, deal) {
             slut_planning_period: plannedEnd,
             opret_i_rentam_request: "Ja",
             hidden_rentman_request: true,
-            rentman_projekt: link
+            rentman_projekt: link,
+            rentman_database_id: deal.number
         },
         createdAt: createDate,
     };
