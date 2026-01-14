@@ -1,532 +1,340 @@
-// hubspot-contact.js (opdateret)
-const { log } = require('winston');
-const pool = require('../../db');
-const dotenv = require('dotenv');
+const config = require('../../config');
+const { createChildLogger } = require('../../lib/logger');
+const db = require('../../lib/database');
+const hubspot = require('../../lib/hubspot-client');
+const rentman = require('../../lib/rentman-client');
+const { sanitizeEmail, formatContactName, randomSleep, retry, findAssociationId, sleep } = require('../../lib/utils');
 
-dotenv.config();
+const logger = createChildLogger('hubspot-contact');
 
-const HUBSPOT_TOKEN = process.env.HUBSPOT_API_TOKEN;
-const HUBSPOT_ENDPOINT = "https://api.hubapi.com/crm/v3/objects/";
-const HUBSPOT_ENDPOINT_v4 = "https://api.hubapi.com/crm/v4/objects/";
-
-const RENTMAN_API_BASE = "https://api.rentman.net";
-const RENTMAN_API_TOKEN = process.env.RENTMAN_ACCESS_TOKEN;
-
-// Hjælpefunktion til at hente fra HubSpot
-async function hubspotGetFromEndpoint(type, id, query) {
-
-    console.log(`Henter data fra HubSpot: ${HUBSPOT_ENDPOINT}${type}/${id}${query}`);
-    const url = `${HUBSPOT_ENDPOINT}${type}/${id}${query}`;
-
-    const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-            'Accept': 'application/json',
-            'Authorization': `Bearer ${HUBSPOT_TOKEN}`,
-        }
-    });
-
-    if (response.status === 404) {
-        console.warn(`Objekt ikke fundet i HubSpot: ${type}/${id}`);
-        return false;
-    }
-
-    if (!response.ok) {
-        const errText = await response.text();
-        console.error(`Fejl ved hentning fra HubSpot: ${response.status}, ${errText}`);
-        throw new Error(`HTTP error fra HubSpot: ${response.status}, ${errText}`);
-    }
-
-    const output = await response.json();
-    return output;
-}
-
-// Hjælpefunktion til at hente fra Rentman
-async function rentmanGetFromEndpoint(endpoint) {
-    const url = `${RENTMAN_API_BASE}${endpoint}`;
-    console.log(`Henter data fra Rentman: ${url}`);
-    const response = await fetch(url, {
-        headers: {
-            "Accept": "application/json",
-            "Authorization": `Bearer ${RENTMAN_API_TOKEN}`,
-        },
-    });
-
-    if (!response.ok) {
-        const errText = await response.text();
-        console.error(`Fejl ved hentning fra Rentman: ${response.status}, ${errText}`);
-        throw new Error(`HTTP error fra Rentman: ${response.status}, ${errText}`);
-    }
-
-    const output = await response.json();
-    console.log(`Hentet data fra Rentman for endpoint ${endpoint}`);
-    return output.data;
-}
-
-// Opret virksomhed i Rentman
-async function rentmanCreateCompany(data) {
-    const url = `${RENTMAN_API_BASE}/contacts`;
-    const body = {
-        name: data.properties.name,
-        VAT_code: data.properties.cvrnummer || ''
-    };
-    console.log(`Opretter virksomhed i Rentman: ${data.properties.name}`);
-
-    const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${RENTMAN_API_TOKEN}`,
-        },
-        body: JSON.stringify(body),
-    });
-
-    if (!response.ok) {
-        const errText = await response.text();
-        console.error(`Fejl ved oprettelse af virksomhed i Rentman: ${response.status}, ${errText}`);
-        throw new Error(`HTTP error! status: ${response.status}, message: ${errText}`);
-    }
-
-    const output = await response.json();
-    console.log(`Virksomhed oprettet i Rentman med ID: ${output.data.id}`);
-    return output.data;
-}
-
-// Opret kontaktperson i Rentman under en virksomhed
-async function rentmanCreateContactPerson(data, companyRentmanId) {
-
-    const url = `${RENTMAN_API_BASE}/contacts/${companyRentmanId}/contactpersons`;
-    let email = data.properties.email ? data.properties.email.trim().replace(/\s+/g, '') : null;
-
-
-    const body = {
-        firstname: data.properties.firstname || '',
-        lastname: data.properties.lastname || '',
-    };
-    if (email) {
-        const [localPart, domainPart] = email.split('@');
-        if (!/\.[a-zA-Z]{2,}$/.test(domainPart)) {
-            email = `${localPart}@${domainPart}.dk`;
-        }
-        body.email = email
-    }
-    console.log(`Opretter kontaktperson i Rentman under virksomhed ${companyRentmanId}: ${data.properties.firstname} ${data.properties.lastname}`);
-
-    const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${RENTMAN_API_TOKEN}`,
-        },
-        body: JSON.stringify(body),
-    });
-
-    if (!response.ok) {
-        const errText = await response.text();
-        console.error(`Fejl ved oprettelse af kontaktperson i Rentman: ${response.status}, ${errText}`);
-        throw new Error(`HTTP error! status: ${response.status}, message: ${errText}`);
-    }
-
-    const output = await response.json();
-    console.log(`Kontaktperson oprettet i Rentman med ID: ${output.data.id}`);
-    return output.data;
-}
-
-// Opdater virksomhed i Rentman
-async function rentmanUpdateCompany(id, data) {
-    const url = `${RENTMAN_API_BASE}/contacts/${id}`;
-    const body = {
-        name: data.properties.name,
-        VAT_code: data.properties.cvrnummer || ''
-    };
-    console.log(`Opdaterer virksomhed i Rentman ID: ${id}`);
-
-    const response = await fetch(url, {
-        method: 'PUT',
-        headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${RENTMAN_API_TOKEN}`,
-        },
-        body: JSON.stringify(body),
-    });
-
-    if (!response.ok) {
-        const errText = await response.text();
-        console.error(`Fejl ved opdatering af virksomhed i Rentman: ${response.status}, ${errText}`);
-        throw new Error(`HTTP error! status: ${response.status}, message: ${errText}`);
-    }
-
-    console.log(`Virksomhed opdateret i Rentman ID: ${id}`);
-    return true;
-}
-
-// Opdater kontaktperson i Rentman
-async function rentmanUpdateContactPerson(id, data) {
-    const url = `${RENTMAN_API_BASE}/contactpersons/${id}`;
-
-    let email = data.properties.email ? data.properties.email.trim().replace(/\s+/g, '') : '';
-    if (email) {
-        const [localPart, domainPart] = email.split('@');
-        if (!/\.[a-zA-Z]{2,}$/.test(domainPart)) {
-            email = `${localPart}@${domainPart}.dk`;
-        }
-    }
-
-    const body = {
-        firstname: data.properties.firstname || '',
-        lastname: data.properties.lastname || '',
-
-        email: email
-    };
-    console.log(`Opdaterer kontaktperson i Rentman ID: ${id}`);
-
-    const response = await fetch(url, {
-        method: 'PUT',
-        headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${RENTMAN_API_TOKEN}`,
-        },
-        body: JSON.stringify(body),
-    });
-
-    if (!response.ok) {
-        const errText = await response.text();
-        console.error(`Fejl ved opdatering af kontaktperson i Rentman: ${response.status}, ${errText}`);
-        throw new Error(`HTTP error! status: ${response.status}, message: ${errText}`);
-    }
-
-    console.log(`Kontaktperson opdateret i Rentman ID: ${id}`);
-    return true;
-}
-
-// Slet virksomhed i Rentman
-async function rentmanDeleteCompany(id) {
-    const url = `${RENTMAN_API_BASE}/contacts/${id}`;
-    console.log(`Sletter virksomhed i Rentman ID: ${id}`);
-    const response = await fetch(url, {
-        method: 'DELETE',
-        headers: {
-            'Accept': 'application/json',
-            'Authorization': `Bearer ${RENTMAN_API_TOKEN}`,
-        }
-    });
-
-    if (!response.ok) {
-        const errText = await response.text();
-        console.error(`Fejl ved sletning af virksomhed i Rentman: ${response.status}, ${errText}`);
-        throw new Error(`HTTP error! status: ${response.status}, message: ${errText}`);
-    }
-
-    console.log(`Virksomhed slettet i Rentman ID: ${id}`);
-    return true;
-}
-
-// Slet kontaktperson i Rentman
-async function rentmanDeleteContactPerson(id) {
-    const url = `${RENTMAN_API_BASE}/contactpersons/${id}`;
-    console.log(`Sletter kontaktperson i Rentman ID: ${id}`);
-    const response = await fetch(url, {
-        method: 'DELETE',
-        headers: {
-            'Accept': 'application/json',
-            'Authorization': `Bearer ${RENTMAN_API_TOKEN}`,
-        }
-    });
-
-    if (!response.ok) {
-        const errText = await response.text();
-        console.error(`Fejl ved sletning af kontaktperson i Rentman: ${response.status}, ${errText}`);
-        throw new Error(`HTTP error! status: ${response.status}, message: ${errText}`);
-    }
-
-    console.log(`Kontaktperson slettet i Rentman ID: ${id}`);
-    return true;
-}
-
-// Hovedfunktion til at håndtere HubSpot webhooks for contacts
 async function handleHubSpotContactWebhook(events) {
-    console.log(`Behandler ${events.length} events fra HubSpot webhook`);
-    const ranNum = Math.floor(Math.random() * 2) + 1;
-    let amn = 0
-    let triggers = []
-    try {
+    logger.info('Behandler HubSpot contact webhook', { eventCount: events.length });
 
-        for (const event of events) {
-            amn++
-            console.log(`Trigger Event:`)
-            console.log(event)
-            const waitTime = Math.floor(Math.random() * (2000 - 500 + 1)) + 500;
-            await new Promise(r => setTimeout(r, waitTime))
-            if (event.changeSource === "OBJECT_MERGE") break;
-            if (event.objectId) { // Alle ikke associations
+    for (const event of events) {
+        await randomSleep(500, 2000);
 
-                // #########################
-                // #        CONTACTS       #
-                // #########################
-
-                if (event.objectTypeId === "0-1") {
-                    if (event.subscriptionType === "object.deletion") continue;
-                    const contact = await hubspotGetFromEndpoint(event.objectTypeId, event.objectId, "?associations=companies")
-                    if (event.subscriptionType === "object.creation") {
-
-                        if (!contact?.associations?.companies) {
-                            console.log('Fandt ingen tilknyttet virksomed');
-                            continue;
-                        }
-                        const allCompanies = contact?.associations?.companies?.results
-                        // Søger efter company id 
-                        let primaryCompany;
-                        for (company of allCompanies) {
-                            if (company?.type === "contact_to_company") primaryCompany = company?.id
-                        }
-                        let dbCompany;
-                        //Søger efter rentman ID
-                        for (let i = 0; i < 3; i++) {
-                            [dbCompany] = await pool.query('SELECT * FROM synced_companies WHERE hubspot_id = ?', [primaryCompany])
-
-                            if (dbCompany?.[0]) break;
-
-                            console.log(`Fandt ingen virksomhed med Hubspot ID ${primaryCompany}. Prøver igen.`);
-                            await new Promise(r => setTimeout(r, 3000)); // vent 3 sek
-                        }
-                        const rentmanCompany = dbCompany[0].rentman_id
-                        if (!rentmanCompany) {
-                            console.log('STOPPER Fandt ingen virksomhed tilknyttet i Rentman.');
-                            break;
-                        }
-                        const rentmanId = await rentmanCreateContactPerson(contact, rentmanCompany)
-                        triggers.push(`${amn}: 01(contact) = object.creation (SUCCESFULD)`)
-                        triggers.push(event)
-                        const name = `${contact.properties.firstname || ""} ${contact.properties.lastname || ""}`
-                        await pool.query(
-                            'INSERT INTO synced_contacts (name, rentman_id, hubspot_id, hubspot_company_conntected) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE name=VALUES(name), hubspot_id=VALUES(hubspot_id)',
-                            [name, rentmanId.id, contact.id, dbCompany[0].hubspot_id]
-                        );
-
-                        console.log('Oprettede contactperson til virksomhed med id: ' + rentmanCompany);
-                    } else if (event.subscriptionType === "object.propertyChange") {
-                        // FINDER RENTMAN ID
-                        let dbContacts;
-                        for (let i = 0; i < 3; i++) {
-                            [dbContacts] = await pool.query('SELECT * FROM synced_contacts WHERE hubspot_id = ?', [contact.id])
-
-                            if (dbContacts?.[0]) break;
-
-                            console.log(`Fandt ingen contact med Hubspot ID ${contact.id}. Prøver igen.`);
-                            await new Promise(r => setTimeout(r, 3000)); // vent 3 sek
-                        }
-                        const rentmanContact = dbContacts[0].rentman_id
-                        if (!rentmanContact) {
-                            console.log('STOPPER Fandt ingen contact i Rentman.');
-                            break;
-                        }
-                        await rentmanUpdateContactPerson(rentmanContact, contact)
-                        triggers.push(`${amn}: 01(contact) = object.propertyChange (SUCCESFULD)`)
-                        triggers.push(event)
-                        const name = `${contact.properties.firstname || ""} ${contact.properties.lastname || ""}`
-                        console.log('Opdateret kontaktperson: ' + name);
-                    }
-
-
-                    // #########################
-                    // #        COMPANIES      #
-                    // #########################
-
-                } else if (event.objectTypeId === "0-2") {
-                    if (event.subscriptionType === "object.deletion") continue;
-
-                    const company = await hubspotGetFromEndpoint(event.objectTypeId, event.objectId, "?properties=cvrnummer,name&associations=contacts")
-
-                    if (event.subscriptionType === "object.creation") {
-
-
-                        const rentmanId = await rentmanCreateCompany(company)
-                        triggers.push(`${amn}: 02(company) = object.creation (SUCCESFULD)`)
-                        triggers.push(event)
-                        await pool.query(
-                            'INSERT INTO synced_companies (name, rentman_id, hubspot_id) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE name=VALUES(name), hubspot_id=VALUES(hubspot_id)',
-                            [company.properties.name, rentmanId.id, company.id]
-                        );
-                        console.log(`Oprettede virksomhed i Rentman ${company.properties.name}`);
-
-
-                    } if (event.subscriptionType === "object.propertyChange") {
-                        let dbCompany;
-
-                        for (let i = 0; i < 3; i++) {
-                            [dbCompany] = await pool.query('SELECT * FROM synced_companies WHERE hubspot_id = ?', [company.id])
-
-                            if (dbCompany?.[0]) break;
-
-                            console.log(`Fandt ingen contact med Hubspot ID ${company.id}. Prøver igen.`);
-                            await new Promise(r => setTimeout(r, 3000)); // vent 3 sek
-                        }
-                        const rentmanCompany = dbCompany[0].rentman_id
-
-                        if (!rentmanCompany) {
-                            console.log('STOPPER Fandt ingen contact i Rentman.');
-                            break;
-                        }
-                        await rentmanUpdateCompany(rentmanCompany, company)
-                        triggers.push(`${amn}: 02(company) = object.propertyChange (SUCCESFULD)`)
-                        triggers.push(event)
-                        await pool.query(
-                            'UPDATE synced_companies SET name = ? WHERE hubspot_id = ?', [company.properties.name, company.id]
-                        )
-                        console.log('Opdateret virksomhed: ' + company.properties.name);
-                    }
-
-
-                }
-
-
-
-
-            } else { //alle associations
-                let dublet = false;
-
-                if (event.associationType === "CONTACT_TO_COMPANY" || event.associationType === "COMPANY_TO_CONTACT") {
-                    const type = event.associationType.split("_TO_");
-                    let company;
-                    let contact;
-
-                    // Hent company og contact baseret på association retning
-                    if (type[0] === "CONTACT") {
-                        company = await hubspotGetFromEndpoint("0-2", event.toObjectId, "?properties=cvrnummer,name&associations=contacts");
-                        contact = await hubspotGetFromEndpoint("0-1", event.fromObjectId, "?associations=companies");
-                    } else if (type[0] === "COMPANY") {
-                        company = await hubspotGetFromEndpoint("0-2", event.fromObjectId, "?properties=cvrnummer,name&associations=contacts");
-                        contact = await hubspotGetFromEndpoint("0-1", event.toObjectId, "?associations=companies");
-                    }
-
-                    const name = `${contact.properties.firstname || ""} ${contact.properties.lastname || ""}`;
-
-                    // Valider at vi har både company og contact
-                    if (!company) break;
-                    if (!contact) break;
-
-                    // Find company i database med retry logik
-                    let dbCompany;
-                    for (let i = 0; i < ranNum; i++) {
-                        [dbCompany] = await pool.query('SELECT * FROM synced_companies WHERE hubspot_id = ?', [company.id]);
-
-                        if (dbCompany?.[0]) break;
-
-                        console.log(`Fandt ingen company med Hubspot ID ${company.id}. Prøver igen.`);
-                        await new Promise(r => setTimeout(r, 3000));
-                    }
-
-                    const rentmanCompany = dbCompany?.[0]?.rentman_id;
-                    const currentCompanyId = dbCompany?.[0]?.hubspot_id;
-
-                    if (!rentmanCompany) {
-                        console.log('STOPPER Fandt ingen company i Rentman.');
-                        break;
-                    }
-
-                    let dbContacts;
-
-                    // Håndter fjernelse af association
-                    if (event.associationRemoved) {
-                        // Find contact i database med retry logik
-                        for (let i = 0; i < 3; i++) {
-                            [dbContacts] = await pool.query('SELECT * FROM synced_contacts WHERE hubspot_id = ? AND hubspot_company_conntected = ?', [contact.id, currentCompanyId]);
-
-                            if (dbContacts?.[0]) break;
-
-                            console.log(`Fandt ingen contact med Hubspot ID ${contact.id}. Prøver igen.`);
-                            await new Promise(r => setTimeout(r, 3000));
-                        }
-
-                        const rentmanContact = dbContacts;
-
-                        if (!rentmanContact || !rentmanContact[0]) {
-                            console.log('STOPPER Fandt ingen contact i Rentman.');
-                            break;
-                        }
-
-                        // Slet contact hvis den er knyttet til den rigtige company
-                        for (const sqlLine of dbContacts) {
-                            if (sqlLine.hubspot_company_conntected == currentCompanyId) {
-                                await rentmanDeleteContactPerson(rentmanContact);
-                                await pool.query('DELETE FROM synced_contacts WHERE hubspot_id = ? AND hubspot_company_conntected = ?', [contact.id, currentCompanyId]);
-                                console.log(`Slettede kontaktperson ${name}`);
-                                break;
-                            }
-                        }
-                    }
-                    // Håndter tilføjelse af association
-                    else {
-                        // Dobbelttjek for dubletter med retry logik - VIGTIGT: Flere retries for race conditions
-                        for (let d = 0; d < 2; d++) {
-                            dublet = false; // Reset dublet for hver iteration
-
-                            // Tjek om contact allerede eksisterer på DENNE company
-                            for (let i = 0; i < ranNum + amn; i++) {
-                                [dbContacts] = await pool.query(
-                                    'SELECT * FROM synced_contacts WHERE hubspot_id = ? AND hubspot_company_conntected = ?',
-                                    [contact.id, currentCompanyId]
-                                );
-                                console.log(`Tjekker dubletter for contact ${contact.id} på company ${currentCompanyId}`);
-
-                                if (dbContacts?.[0]) {
-                                    console.log(`STOPPER - Fandt eksisterende contact på denne company`);
-                                    console.log(dbContacts[0]);
-                                    dublet = true;
-                                    break;
-                                }
-
-                                await new Promise(r => setTimeout(r, 1000));
-                            }
-
-                            if (dublet) break;
-
-                            await new Promise(r => setTimeout(r, waitTime));
-                        }
-
-                        // Hvis dublet fundet, stop her
-                        if (dublet) break;
-
-                        console.log(`Ingen dubletter - opretter kontaktperson på company ${currentCompanyId}`);
-                        const rentmanId = await rentmanCreateContactPerson(contact, rentmanCompany);
-
-                        // KRITISK: Tjek ÉN GANG TIL efter Rentman oprettelse men FØR database insert
-                        [dbContacts] = await pool.query(
-                            'SELECT * FROM synced_contacts WHERE hubspot_id = ? AND hubspot_company_conntected = ?',
-                            [contact.id, currentCompanyId]
-                        );
-
-                        if (dbContacts?.[0]) {
-                            console.log(`RACE CONDITION OPDAGET - En anden process har allerede oprettet denne kontakt. Sletter Rentman contact ${rentmanId.id}`);
-                            await rentmanDeleteContactPerson({ rentman_id: rentmanId.id });
-                            break;
-                        }
-
-                        triggers.push(`${amn}: ASSOCIATIONS createContactPerson (SUCCESFULD)`);
-                        triggers.push(event);
-
-                        await pool.query(
-                            'INSERT INTO synced_contacts (name, rentman_id, hubspot_id, hubspot_company_conntected) VALUES (?, ?, ?, ?)',
-                            [name, rentmanId.id, contact.id, currentCompanyId]
-                        );
-
-                        console.log(`Oprettede kontaktperson ${name} med Rentman ID ${rentmanId.id}`);
-                    }
-                }
-            }
-
-
+        if (event.changeSource === 'OBJECT_MERGE') {
+            logger.info('Ignorerer OBJECT_MERGE event');
+            break;
         }
-        console.log(`Trigger events:`)
-        triggers.forEach((trigger) => { console.log(trigger) })
 
-    } catch (err) {
-        console.log(err);
+        try {
+            if (event.objectId) {
+                await handleObjectEvent(event);
+            } else if (event.associationType) {
+                await handleAssociationEvent(event);
+            }
+        } catch (error) {
+            logger.error('Fejl ved behandling af contact event', {
+                error: error.message,
+                stack: error.stack,
+                event
+            });
+        }
     }
 }
 
-module.exports = { handleHubSpotContactWebhook };
+async function handleObjectEvent(event) {
+    const { objectTypeId, subscriptionType, objectId } = event;
+
+    if (subscriptionType === 'object.deletion') {
+        return;
+    }
+
+    if (objectTypeId === config.hubspot.objectTypes.contacts) {
+        await handleContactEvent(event);
+    } else if (objectTypeId === config.hubspot.objectTypes.companies) {
+        await handleCompanyEvent(event);
+    }
+}
+
+async function handleContactEvent(event) {
+    const { subscriptionType, objectId } = event;
+    const contact = await hubspot.getContact(objectId, ['firstname', 'lastname', 'email']);
+
+    if (!contact) {
+        logger.warn('Kontakt ikke fundet i HubSpot', { objectId });
+        return;
+    }
+
+    if (subscriptionType === 'object.creation') {
+        await handleContactCreation(contact);
+    } else if (subscriptionType === 'object.propertyChange') {
+        await handleContactUpdate(contact);
+    }
+}
+
+async function handleContactCreation(contact) {
+    const companyAssociations = contact.associations?.companies?.results;
+
+    if (!companyAssociations || companyAssociations.length === 0) {
+        logger.info('Kontakt har ingen tilknyttet virksomhed', { contactId: contact.id });
+        return;
+    }
+
+    const primaryCompanyId = findAssociationId(companyAssociations, 'contact_to_company');
+
+    if (!primaryCompanyId) {
+        logger.info('Kontakt har ingen primary company association', { contactId: contact.id });
+        return;
+    }
+
+    const dbCompany = await retry(
+        () => db.findSyncedCompanyByHubspotId(primaryCompanyId),
+        { maxAttempts: 3, delayMs: 3000 }
+    );
+
+    if (!dbCompany?.rentman_id) {
+        logger.warn('Ingen Rentman virksomhed fundet', { hubspotCompanyId: primaryCompanyId });
+        return;
+    }
+
+    const contactData = buildRentmanContactData(contact);
+    const rentmanPerson = await rentman.createContactPerson(dbCompany.rentman_id, contactData);
+
+    const name = formatContactName(
+        contact.properties.firstname,
+        null,
+        contact.properties.lastname
+    );
+
+    await db.upsertSyncedContact(name, rentmanPerson.id, contact.id, dbCompany.hubspot_id);
+
+    logger.syncOperation('create', 'contact_person', {
+        rentmanId: rentmanPerson.id,
+        hubspotId: contact.id,
+        companyId: dbCompany.rentman_id
+    }, true);
+}
+
+async function handleContactUpdate(contact) {
+    const dbContact = await retry(
+        () => db.findSyncedContactByHubspotId(contact.id),
+        { maxAttempts: 3, delayMs: 3000 }
+    );
+
+    if (!dbContact?.rentman_id) {
+        logger.warn('Ingen Rentman kontakt fundet', { hubspotId: contact.id });
+        return;
+    }
+
+    const contactData = buildRentmanContactData(contact);
+    await rentman.updateContactPerson(dbContact.rentman_id, contactData);
+
+    const name = formatContactName(
+        contact.properties.firstname,
+        null,
+        contact.properties.lastname
+    );
+
+    await db.updateSyncedContactName(dbContact.rentman_id, name);
+
+    logger.syncOperation('update', 'contact_person', {
+        rentmanId: dbContact.rentman_id,
+        hubspotId: contact.id
+    }, true);
+}
+
+async function handleCompanyEvent(event) {
+    const { subscriptionType, objectId } = event;
+    const company = await hubspot.getCompany(objectId);
+
+    if (!company) {
+        logger.warn('Virksomhed ikke fundet i HubSpot', { objectId });
+        return;
+    }
+
+    if (subscriptionType === 'object.creation') {
+        await handleCompanyCreation(company);
+    } else if (subscriptionType === 'object.propertyChange') {
+        await handleCompanyUpdate(company);
+    }
+}
+
+async function handleCompanyCreation(company) {
+    const rentmanContact = await rentman.createContact(
+        company.properties.name,
+        company.properties.cvrnummer || ''
+    );
+
+    await db.upsertSyncedCompany(
+        company.properties.name,
+        rentmanContact.id,
+        company.id
+    );
+
+    logger.syncOperation('create', 'company', {
+        rentmanId: rentmanContact.id,
+        hubspotId: company.id
+    }, true);
+}
+
+async function handleCompanyUpdate(company) {
+    const dbCompany = await retry(
+        () => db.findSyncedCompanyByHubspotId(company.id),
+        { maxAttempts: 3, delayMs: 3000 }
+    );
+
+    if (!dbCompany?.rentman_id) {
+        logger.warn('Ingen Rentman virksomhed fundet', { hubspotId: company.id });
+        return;
+    }
+
+    await rentman.updateContact(dbCompany.rentman_id, {
+        name: company.properties.name,
+        VAT_code: company.properties.cvrnummer || ''
+    });
+
+    await db.updateSyncedCompanyName(company.id, company.properties.name);
+
+    logger.syncOperation('update', 'company', {
+        rentmanId: dbCompany.rentman_id,
+        hubspotId: company.id
+    }, true);
+}
+
+async function handleAssociationEvent(event) {
+    const { associationType, associationRemoved, fromObjectId, toObjectId } = event;
+
+    if (associationType !== 'CONTACT_TO_COMPANY' && associationType !== 'COMPANY_TO_CONTACT') {
+        return;
+    }
+
+    const isContactToCompany = associationType === 'CONTACT_TO_COMPANY';
+    const companyId = isContactToCompany ? toObjectId : fromObjectId;
+    const contactId = isContactToCompany ? fromObjectId : toObjectId;
+
+    const company = await hubspot.getCompany(companyId);
+    const contact = await hubspot.getContact(contactId, ['firstname', 'lastname', 'email']);
+
+    if (!company || !contact) {
+        logger.warn('Kunne ikke hente company eller contact', { companyId, contactId });
+        return;
+    }
+
+    const dbCompany = await retry(
+        () => db.findSyncedCompanyByHubspotId(company.id),
+        { maxAttempts: 3, delayMs: 3000 }
+    );
+
+    if (!dbCompany?.rentman_id) {
+        logger.warn('Ingen Rentman virksomhed fundet for association', {
+            hubspotCompanyId: company.id
+        });
+        return;
+    }
+
+    if (associationRemoved) {
+        await handleAssociationRemoval(contact, dbCompany);
+    } else {
+        await handleAssociationCreation(contact, dbCompany);
+    }
+}
+
+async function handleAssociationRemoval(contact, dbCompany) {
+    const dbContact = await retry(
+        () => db.findSyncedContactByHubspotIdAndCompany(contact.id, dbCompany.hubspot_id),
+        { maxAttempts: 3, delayMs: 3000 }
+    );
+
+    if (!dbContact) {
+        logger.warn('Ingen synced contact fundet for fjernelse', {
+            hubspotContactId: contact.id,
+            hubspotCompanyId: dbCompany.hubspot_id
+        });
+        return;
+    }
+
+    await rentman.deleteContactPerson(dbContact.rentman_id);
+    await db.deleteSyncedContactByHubspotIdAndCompany(contact.id, dbCompany.hubspot_id);
+
+    const name = formatContactName(
+        contact.properties.firstname,
+        null,
+        contact.properties.lastname
+    );
+
+    logger.syncOperation('delete', 'contact_person', {
+        rentmanId: dbContact.rentman_id,
+        hubspotId: contact.id,
+        name
+    }, true);
+}
+
+async function handleAssociationCreation(contact, dbCompany) {
+    const existingContact = await db.findSyncedContactByHubspotIdAndCompany(
+        contact.id,
+        dbCompany.hubspot_id
+    );
+
+    if (existingContact) {
+        logger.info('Kontakt allerede synced til denne virksomhed', {
+            contactId: contact.id,
+            companyId: dbCompany.hubspot_id
+        });
+        return;
+    }
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+        const duplicateCheck = await db.findSyncedContactByHubspotIdAndCompany(
+            contact.id,
+            dbCompany.hubspot_id
+        );
+
+        if (duplicateCheck) {
+            logger.info('Duplikat fundet efter retry', { contactId: contact.id });
+            return;
+        }
+
+        await randomSleep(500, 2000);
+    }
+
+    const contactData = buildRentmanContactData(contact);
+    const rentmanPerson = await rentman.createContactPerson(dbCompany.rentman_id, contactData);
+
+    const finalCheck = await db.findSyncedContactByHubspotIdAndCompany(
+        contact.id,
+        dbCompany.hubspot_id
+    );
+
+    if (finalCheck) {
+        logger.warn('Race condition opdaget - sletter nyoprettet Rentman kontakt', {
+            rentmanId: rentmanPerson.id
+        });
+        await rentman.deleteContactPerson(rentmanPerson.id);
+        return;
+    }
+
+    const name = formatContactName(
+        contact.properties.firstname,
+        null,
+        contact.properties.lastname
+    );
+
+    await db.insertSyncedContact(name, rentmanPerson.id, contact.id, dbCompany.hubspot_id);
+
+    logger.syncOperation('create', 'contact_person', {
+        rentmanId: rentmanPerson.id,
+        hubspotId: contact.id,
+        companyId: dbCompany.rentman_id
+    }, true);
+}
+
+function buildRentmanContactData(contact) {
+    const email = sanitizeEmail(contact.properties.email);
+
+    const data = {
+        firstname: contact.properties.firstname || '',
+        lastname: contact.properties.lastname || ''
+    };
+
+    if (email) {
+        data.email = email;
+    }
+
+    return data;
+}
+
+module.exports = {
+    handleHubSpotContactWebhook
+};

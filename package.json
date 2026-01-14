@@ -1,27 +1,34 @@
 {
+  "name": "rentman-hubspot-integration",
+  "version": "2.0.0",
+  "description": "HubSpot CRM and Rentman warehouse rental software integration",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "NODE_ENV=development node app.js"
+  },
+  "keywords": [
+    "hubspot",
+    "rentman",
+    "integration",
+    "crm",
+    "webhook"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
   "dependencies": {
     "@aws-sdk/client-sns": "^3.934.0",
-    "aws-sdk": "^2.1692.0",
     "axios": "^1.12.2",
-    "body-parser": "^2.2.1",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "express-session": "^1.18.2",
     "mysql2": "^3.15.3",
-    "path": "^0.12.7",
     "winston": "^3.18.3",
     "winston-cloudwatch": "^6.3.0",
     "winston-transport": "^4.9.0"
   },
-  "name": "rentman",
-  "version": "1.1.0",
-  "description": "",
-  "main": "app.js",
-  "scripts": {
-    "start": "node app.js"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs"
+  "engines": {
+    "node": ">=18.0.0"
+  }
 }

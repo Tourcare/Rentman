@@ -1,154 +1,101 @@
-const pool = require('../../db');
+const { createChildLogger } = require('../../lib/logger');
+const db = require('../../lib/database');
+const hubspot = require('../../lib/hubspot-client');
+const rentman = require('../../lib/rentman-client');
+const { sanitizeNumber, extractIdFromRef } = require('../../lib/utils');
 
-const HUBSPOT_TOKEN = process.env.HUBSPOT_API_TOKEN;
-const HUBSPOT_ENDPOINT = "https://api.hubapi.com/crm/v3/objects/"
-const HUBSPOT_ENDPOINT_v4 = "https://api.hubapi.com/crm/v4/objects/"
+const logger = createChildLogger('rentman-cost');
 
-const RENTMAN_API_BASE = "https://api.rentman.net";
-const RENTMAN_API_TOKEN = process.env.RENTMAN_ACCESS_TOKEN;
+async function handleEquipmentUpdate(event) {
+    logger.info('handleEquipmentUpdate kaldet', { itemCount: event.items.length });
 
-let userFromSql
-async function loadSqlUsers() {
-    [userFromSql] = await pool.execute(`SELECT * FROM synced_users`)
-}
-
-loadSqlUsers();
-
-function sanitizeNumber(value, decimals = 2) {
-    const EPSILON = 1e-6;
-
-    // Hvis værdien er ekstremt tæt på nul, sæt til 0
-    if (Math.abs(value) < EPSILON) return 0;
-
-    // Fjern floating-point-støj ved at runde
-    const rounded = Number(value.toFixed(decimals));
-
-    return rounded;
-}
-
-async function rentmanGetFromEndpoint(endpoint, attempt = 1) {
-    if (endpoint === null) {
-        return false;
-    }
-    const maxRetries = 5;
-    const baseDelay = 5000; // Start med 1 sekund
-    const retryDelay = baseDelay * (2 ** (attempt - 1)); // Eksponentiel backoff: 1s, 2s, 4s, 8s, 16s
-
-    const url = `${RENTMAN_API_BASE}${endpoint}`;
-
-    try {
-        const response = await fetch(url, {
-            method: 'GET',
-            headers: {
-                'Accept': 'application/json',
-                'Authorization': `Bearer ${RENTMAN_API_TOKEN}`
-            }
-        });
-
-        if (response.status === 429) {
-            if (attempt >= maxRetries) {
-                throw new Error(`Rate limit ramt og max retries (${maxRetries}) nået for ${endpoint}`);
-            }
-            console.error(`Rate limit ramt (forsøg ${attempt}). Venter ${retryDelay / 1000} sekunder...`);
-            const start = Date.now();
-            await new Promise(res => setTimeout(res, retryDelay));
-            console.log(`Ventetid slut efter ${(Date.now() - start) / 1000} sekunder. Prøver igen...`);
-            return rentmanGetFromEndpoint(endpoint, attempt + 1);
-        }
-
-        if (!response.ok) {
-            const errText = await response.text();
-            throw new Error(`HTTP error! status: ${response.status}, message: ${errText}`);
-        }
-
-        const output = await response.json();
-        return output.data;
-    } catch (error) {
-        console.error(`Fejl i rentmanGetFromEndpoint for ${endpoint} (forsøg ${attempt}):`, error);
-        throw error;
-    }
-}
-
-async function hubspotUpdateOrderFinancial(rentmanSubID, hubspotid) {
-    const rentmanData = await rentmanGetFromEndpoint(`/subprojects/${rentmanSubID}`)
-
-    const url = `${HUBSPOT_ENDPOINT}0-123/${hubspotid}`
-
-    const total_price = sanitizeNumber(rentmanData.project_total_price)
-
-    const body = {
-        properties: {
-            hs_total_price: total_price
-        }
-    };
-    const response = await fetch(url, {
-        method: "PATCH",
-        headers: {
-            'Content-Type': 'application/json',
-            "Accept": "application/json",
-            "Authorization": `Bearer ${HUBSPOT_TOKEN}`,
-        },
-        body: JSON.stringify(body),
-    });
-
-    if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`HTTP error! status: ${response.status}, message: ${errText}`);
-    }
-}
-
-async function hubspotUpdateDealFinancial(rentmanMainId, hubspotid) {
-    const rentmanData = await rentmanGetFromEndpoint(`/projects/${rentmanMainId}`)
-    
-    const url = `${HUBSPOT_ENDPOINT}0-3/${hubspotid}`
-
-    const total_price = sanitizeNumber(rentmanData.project_total_price)
-
-    const body = {
-        properties: {
-            amount: total_price
-        }
-    };
-
-    const response = await fetch(url, {
-        method: "PATCH",
-        headers: {
-            'Content-Type': 'application/json',
-            "Accept": "application/json",
-            "Authorization": `Bearer ${HUBSPOT_TOKEN}`,
-        },
-        body: JSON.stringify(body),
-    });
-
-    if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`HTTP error! status: ${response.status}, message: ${errText}`);
-    }
-}
-
-async function newUpdateOnEquipment(event) {
     for (const item of event.items) {
-        if (!item.ref) continue;
-        const rentmanData = await rentmanGetFromEndpoint(item.ref)
-        const subprojectId = rentmanData.subproject.split("/").pop()
-        const projectId = rentmanData.project.split("/").pop()
+        try {
+            if (!item.ref) {
+                continue;
+            }
 
-        if (!projectId) continue;
+            const rentmanData = await rentman.get(item.ref);
+            if (!rentmanData) {
+                logger.warn('Kunne ikke hente equipment data', { ref: item.ref });
+                continue;
+            }
 
-        const [syncedDeals] = await pool.query(`SELECT * FROM synced_deals WHERE rentman_project_id = ?`, [projectId])
-        const [syncedOrder] = await pool.query(`SELECT * FROM synced_order WHERE rentman_subproject_id = ?`, [subprojectId])
+            const subprojectId = extractIdFromRef(rentmanData.subproject);
+            const projectId = extractIdFromRef(rentmanData.project);
 
-        const hubspotDealId = syncedDeals?.[0]?.hubspot_project_id
-        const hubspotOrderId = syncedOrder?.[0]?.hubspot_order_id
+            if (!projectId) {
+                continue;
+            }
 
-        if (!hubspotDealId) continue;
+            const [dealDb, orderDb] = await Promise.all([
+                db.findSyncedDealByRentmanId(projectId),
+                subprojectId ? db.findSyncedOrderByRentmanId(subprojectId) : null
+            ]);
 
-        await hubspotUpdateDealFinancial(projectId, hubspotDealId)
+            const hubspotDealId = dealDb?.hubspot_project_id;
+            const hubspotOrderId = orderDb?.hubspot_order_id;
 
-        if (!hubspotOrderId) continue;
-        await hubspotUpdateOrderFinancial(subprojectId, hubspotOrderId)
+            if (!hubspotDealId) {
+                continue;
+            }
 
+            await updateDealFinancial(projectId, hubspotDealId);
+
+            if (hubspotOrderId && subprojectId) {
+                await updateOrderFinancial(subprojectId, hubspotOrderId);
+            }
+
+            logger.syncOperation('update', 'financials', {
+                projectId,
+                subprojectId,
+                hubspotDealId,
+                hubspotOrderId
+            }, true);
+        } catch (error) {
+            logger.error('Fejl ved opdatering af financials', {
+                error: error.message,
+                stack: error.stack,
+                itemRef: item.ref
+            });
+        }
     }
 }
 
-module.exports = { newUpdateOnEquipment };
+async function updateDealFinancial(rentmanProjectId, hubspotDealId) {
+    const rentmanProject = await rentman.getProject(rentmanProjectId);
+    if (!rentmanProject) {
+        logger.warn('Kunne ikke hente projekt fra Rentman', { projectId: rentmanProjectId });
+        return;
+    }
+
+    const totalPrice = sanitizeNumber(rentmanProject.project_total_price);
+
+    await hubspot.updateDeal(hubspotDealId, { amount: totalPrice });
+
+    logger.debug('Opdateret deal financials', {
+        dealId: hubspotDealId,
+        amount: totalPrice
+    });
+}
+
+async function updateOrderFinancial(rentmanSubprojectId, hubspotOrderId) {
+    const rentmanSubproject = await rentman.get(`/subprojects/${rentmanSubprojectId}`);
+    if (!rentmanSubproject) {
+        logger.warn('Kunne ikke hente subproject fra Rentman', { subprojectId: rentmanSubprojectId });
+        return;
+    }
+
+    const totalPrice = sanitizeNumber(rentmanSubproject.project_total_price);
+
+    await hubspot.updateOrder(hubspotOrderId, { hs_total_price: totalPrice });
+
+    logger.debug('Opdateret order financials', {
+        orderId: hubspotOrderId,
+        totalPrice
+    });
+}
+
+module.exports = {
+    handleEquipmentUpdate
+};

@@ -1,126 +1,79 @@
-const dotenv = require('dotenv');
+const { createChildLogger } = require('../../lib/logger');
+const db = require('../../lib/database');
+const rentman = require('../../lib/rentman-client');
 
-const pool = require('../../db');
-const { rentmanDelRentalRequest } = require('./hubspot-deal');
+const logger = createChildLogger('rentman-request');
 
-const HUBSPOT_TOKEN = process.env.HUBSPOT_API_TOKEN;
-const HUBSPOT_ENDPOINT = "https://api.hubapi.com/crm/v3/objects/"
-const HUBSPOT_ENDPOINT_v4 = "https://api.hubapi.com/crm/v4/objects/"
-
-const RENTMAN_API_BASE = "https://api.rentman.net";
-const RENTMAN_API_TOKEN = process.env.RENTMAN_ACCESS_TOKEN;
-
-function sanitizeNumber(value, decimals = 2) {
-    const EPSILON = 1e-6;
-
-    // Hvis værdien er ekstremt tæt på nul, sæt til 0
-    if (Math.abs(value) < EPSILON) return 0;
-
-    // Fjern floating-point-støj ved at runde
-    const rounded = Number(value.toFixed(decimals));
-
-    return rounded;
-}
-
-async function rentmanGetFromEndpoint(endpoint, attempt = 1) {
-    if (endpoint === null) {
-        return false;
-    }
-    const maxRetries = 5;
-    const baseDelay = 5000; // Start med 1 sekund
-    const retryDelay = baseDelay * (2 ** (attempt - 1)); // Eksponentiel backoff: 1s, 2s, 4s, 8s, 16s
-
-    const url = `${RENTMAN_API_BASE}${endpoint}`;
-
+async function rentmanCrossCheckRental(projectRef) {
     try {
-        const response = await fetch(url, {
-            method: 'GET',
-            headers: {
-                'Accept': 'application/json',
-                'Authorization': `Bearer ${RENTMAN_API_TOKEN}`
-            }
-        });
+        const allRequests = await rentman.getAllProjectRequests();
 
-        if (response.status === 429) {
-            if (attempt >= maxRetries) {
-                throw new Error(`Rate limit ramt og max retries (${maxRetries}) nået for ${endpoint}`);
-            }
-            console.error(`Rate limit ramt (forsøg ${attempt}). Venter ${retryDelay / 1000} sekunder...`);
-            const start = Date.now();
-            await new Promise(res => setTimeout(res, retryDelay));
-            console.log(`Ventetid slut efter ${(Date.now() - start) / 1000} sekunder. Prøver igen...`);
-            return rentmanGetFromEndpoint(endpoint, attempt + 1);
+        if (!allRequests || allRequests.length === 0) {
+            return false;
         }
 
-        if (!response.ok) {
-            const errText = await response.text();
-            throw new Error(`HTTP error! status: ${response.status}, message: ${errText}`);
+        for (const request of allRequests) {
+            if (request.linked_project === projectRef) {
+                logger.info('Fandt matching rental request', {
+                    requestId: request.id,
+                    projectRef
+                });
+
+                const hubspotData = await db.findSyncedRequestByRentmanId(request.id);
+
+                await db.deleteSyncedRequest(request.id);
+                await rentman.deleteProjectRequest(request.id);
+
+                logger.info('Slettede rental request', { requestId: request.id });
+
+                const projectInfo = await rentman.get(projectRef);
+                if (!projectInfo) {
+                    logger.warn('Kunne ikke hente projekt info', { projectRef });
+                    return false;
+                }
+
+                const companyInfo = await rentman.get(projectInfo.customer);
+                const contactInfo = await rentman.get(projectInfo.cust_contact);
+
+                let companyDb = null;
+                let contactDb = null;
+
+                if (companyInfo?.id) {
+                    companyDb = await db.findSyncedCompanyByRentmanId(companyInfo.id);
+                }
+
+                if (contactInfo?.id) {
+                    contactDb = await db.findSyncedContactByRentmanId(contactInfo.id);
+                }
+
+                await db.insertSyncedDeal(
+                    projectInfo.displayname,
+                    projectInfo.id,
+                    hubspotData?.hubspot_deal_id,
+                    companyDb?.id || 0,
+                    contactDb?.id || 0
+                );
+
+                logger.syncOperation('convert', 'request_to_deal', {
+                    rentmanProjectId: projectInfo.id,
+                    hubspotDealId: hubspotData?.hubspot_deal_id
+                }, true);
+
+                return true;
+            }
         }
 
-        const output = await response.json();
-        return output.data;
+        return false;
     } catch (error) {
-        console.error(`Fejl i rentmanGetFromEndpoint for ${endpoint} (forsøg ${attempt}):`, error);
-        throw error;
-    }
-}
-
-async function rentmanGetProjectRequest() {
-    const url = `${RENTMAN_API_BASE}/projectrequests`
-
-    const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-            'Accept': 'application/json',
-            'Authorization': `Bearer ${RENTMAN_API_TOKEN}`,
-        }
-    });
-
-    if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`HTTP error fra Rentman: ${response.status}, ${errText}`);
-    }
-
-    const output = await response.json();
-
-    return output;
-}
-
-async function rentmanCrossCheckRental(ref) {
-    const listOfRequest = await rentmanGetProjectRequest();
-    for (const request of listOfRequest.data) {
-        if (request.linked_project === ref) {
-
-            const [hubspot] = await pool.execute(`SELECT * FROM synced_request WHERE rentman_request_id = ?`, [request.id])
-            
-            await pool.query(
-                'DELETE FROM synced_request WHERE rentman_request_id = ?',
-                [request.id]
-            );
-
-            await rentmanDelRentalRequest(request.id);
-
-            console.log(`Slettede rental request med id ${request.id}`);
-
-
-            const projectInfo = await rentmanGetFromEndpoint(ref)
-            const companyInfo = await rentmanGetFromEndpoint(projectInfo.customer) || 0
-            const contactInfo = await rentmanGetFromEndpoint(projectInfo.cust_contact) || 0
-
-            let companyRows = 0;
-            let contactRows = 0;
-
-            if (companyInfo != 0) {[companyRows] = await pool.execute(`SELECT * FROM synced_companies WHERE rentman_id = ?`, [companyInfo.id])}
-            if (contactInfo != 0) {[contactRows] = await pool.execute(`SELECT * FROM synced_contacts WHERE rentman_id = ?`, [contactInfo.id])}
-            
-            await pool.query(
-                'INSERT INTO synced_deals (project_name, rentman_project_id, hubspot_project_id, synced_companies_id, synced_contact_id) VALUES (?, ?, ?, ?, ?)',
-                [projectInfo.displayname, projectInfo.id, hubspot[0].hubspot_deal_id, companyRows?.[0]?.id ?? 0, contactRows?.[0]?.id ?? 0]
-            );
-            return true;
-        }
+        logger.error('Fejl i rentmanCrossCheckRental', {
+            error: error.message,
+            stack: error.stack,
+            projectRef
+        });
         return false;
     }
 }
 
-module.exports = { rentmanCrossCheckRental };
+module.exports = {
+    rentmanCrossCheckRental
+};

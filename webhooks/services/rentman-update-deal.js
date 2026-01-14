@@ -1,509 +1,310 @@
-const pool = require('../../db');
+const config = require('../../config');
+const { createChildLogger } = require('../../lib/logger');
+const db = require('../../lib/database');
+const hubspot = require('../../lib/hubspot-client');
+const rentman = require('../../lib/rentman-client');
+const { sanitizeNumber, retry, extractIdFromRef, sleep } = require('../../lib/utils');
 
-const HUBSPOT_TOKEN = process.env.HUBSPOT_API_TOKEN;
-const HUBSPOT_ENDPOINT = "https://api.hubapi.com/crm/v3/objects/"
-const HUBSPOT_ENDPOINT_v4 = "https://api.hubapi.com/crm/v4/objects/"
+const logger = createChildLogger('rentman-deal');
 
-const RENTMAN_API_BASE = "https://api.rentman.net";
-const RENTMAN_API_TOKEN = process.env.RENTMAN_ACCESS_TOKEN;
-
-let userFromSql
-async function loadSqlUsers() {
-    [userFromSql] = await pool.execute(`SELECT * FROM synced_users`)
-}
-
-loadSqlUsers();
-
-async function getOrderStatus(order) {
-    const url = `${HUBSPOT_ENDPOINT}0-123/${order}?properties=hs_pipeline_stage`
-    const response = await fetch(url, {
-        method: "GET",
-        headers: {
-            'Content-Type': 'application/json',
-            "Accept": "application/json",
-            "Authorization": `Bearer ${HUBSPOT_TOKEN}`,
-        }
-    });
-    const output = await response.json();
-    return output.properties.hs_pipeline_stage
-}
-
-async function hubspotGetDealInfo(deal) {
-    const url = `${HUBSPOT_ENDPOINT}0-3/${deal}?associations=0-123`
-    const response = await fetch(url, {
-        method: "GET",
-        headers: {
-            'Content-Type': 'application/json',
-            "Accept": "application/json",
-            "Authorization": `Bearer ${HUBSPOT_TOKEN}`,
-        }
-    });
-    const output = await response.json();
-    return output
-}
-
-const dealStageMap = {
-    "937ea84d-0a4f-4dcf-9028-3f9c2aafbf03": "Afventer kunde",
-    "3725360f-519b-4b18-a593-494d60a29c9f": "Aflyst",
-    "aa99e8d0-c1d5-4071-b915-d240bbb1aed9": "Bekræftet",
-    "3852081363": "Afsluttet",
-    "4b27b500-f031-4927-9811-68a0b525cbae": "Koncept",
-    "3531598027": "Skal faktureres",
-    "3c85a297-e9ce-400b-b42e-9f16853d69d6": "Faktureret",
-    "3986020540": "Retur",
-    "4012316916": "Mangler udstyr"
-};
-
-const setStageMap = {
-    "Koncept": "appointmentscheduled",
-    "Afventer kunde": "qualifiedtobuy",
-    "Aflyst": "decisionmakerboughtin",
-    "Bekræftet": "presentationscheduled",
-    "Afsluttet": "3851496691",
-    "Skal faktureres": "3852552384",
-    "Faktureret": "3852552385",
-    "Retur": "3986019567",
-    "Mangler udstyr": "4003784908"
-}
-
-async function updateHubSpotDealStatus(deal) {
-    const project = await hubspotGetDealInfo(deal);
-
-    const priority = ["Skal faktureres", "Bekræftet", "Faktureret", "Afsluttet", "Afventer kunde", "Koncept", "Aflyst"]
-    const associations = project.associations?.orders?.results
-
-    if (associations) {
-        let totalStatus = [];
-
-        for (const order of associations) {
-            const status = await getOrderStatus(order.id);
-            const mapped = dealStageMap[status];
-            if (mapped) totalStatus.push(mapped);
-        }
-        const allSame = totalStatus.length > 0 &&
-            totalStatus.every(s => s === totalStatus[0]);
-
-        if (allSame) {
-            return setStageMap[totalStatus[0]];
-        } else {
-            const status = priority.find(p => totalStatus.includes(p)) || null;
-            return setStageMap[status];
-
-        }
-    }
-
-}
-
-function sanitizeNumber(value, decimals = 2) {
-    const EPSILON = 1e-6;
-
-    // Hvis værdien er ekstremt tæt på nul, sæt til 0
-    if (Math.abs(value) < EPSILON) return 0;
-
-    // Fjern floating-point-støj ved at runde
-    const rounded = Number(value.toFixed(decimals));
-
-    return rounded;
-}
-
-async function rentmanGetFromEndpoint(endpoint, attempt = 1) {
-    if (endpoint === null) {
-        return false;
-    }
-    const maxRetries = 5;
-    const baseDelay = 5000; // Start med 1 sekund
-    const retryDelay = baseDelay * (2 ** (attempt - 1)); // Eksponentiel backoff: 1s, 2s, 4s, 8s, 16s
-
-    const url = `${RENTMAN_API_BASE}${endpoint}`;
+async function syncDeal(webhook) {
+    logger.info('syncDeal funktion kaldet');
 
     try {
-        const response = await fetch(url, {
-            method: 'GET',
-            headers: {
-                'Accept': 'application/json',
-                'Authorization': `Bearer ${RENTMAN_API_TOKEN}`
-            }
-        });
+        const projectRef = webhook.items[0].ref;
+        const project = await rentman.getProjectByRef(projectRef);
 
-        if (response.status === 429) {
-            if (attempt >= maxRetries) {
-                throw new Error(`Rate limit ramt og max retries (${maxRetries}) nået for ${endpoint}`);
-            }
-            console.error(`Rate limit ramt (forsøg ${attempt}). Venter ${retryDelay / 1000} sekunder...`);
-            const start = Date.now();
-            await new Promise(res => setTimeout(res, retryDelay));
-            console.log(`Ventetid slut efter ${(Date.now() - start) / 1000} sekunder. Prøver igen...`);
-            return rentmanGetFromEndpoint(endpoint, attempt + 1);
+        if (!project) {
+            logger.error('Kunne ikke hente projekt fra Rentman', { ref: projectRef });
+            return;
         }
 
-        if (!response.ok) {
-            const errText = await response.text();
-            throw new Error(`HTTP error! status: ${response.status}, message: ${errText}`);
+        const [contactInfo, customerInfo] = await Promise.all([
+            rentman.getContactByRef(project.customer),
+            rentman.getContactPersonByRef(project.cust_contact)
+        ]);
+
+        let companyDb = null;
+        let contactDb = null;
+        let dealId;
+
+        if (contactInfo?.id) {
+            companyDb = await db.findSyncedCompanyByRentmanId(contactInfo.id);
+
+            if (customerInfo?.id) {
+                contactDb = await db.findSyncedContactByRentmanId(customerInfo.id);
+
+                logger.info('Opretter deal med virksomhed og kontaktperson', {
+                    dealname: project.displayname
+                });
+
+                dealId = await createHubSpotDeal(project, companyDb?.hubspot_id, contactDb?.hubspot_id);
+
+                await db.insertSyncedDeal(
+                    project.displayname,
+                    project.id,
+                    dealId,
+                    companyDb?.id || null,
+                    contactDb?.id || null
+                );
+            } else {
+                logger.info('Opretter deal uden kontaktperson', {
+                    dealname: project.displayname
+                });
+
+                dealId = await createHubSpotDeal(project, companyDb?.hubspot_id);
+
+                await db.insertSyncedDeal(
+                    project.displayname,
+                    project.id,
+                    dealId,
+                    companyDb?.id || null,
+                    null
+                );
+            }
+        } else {
+            logger.info('Opretter deal uden virksomhed', {
+                dealname: project.displayname
+            });
+
+            dealId = await createHubSpotDeal(project);
+
+            await db.insertSyncedDeal(
+                project.displayname,
+                project.id,
+                dealId,
+                null,
+                null
+            );
         }
 
-        const output = await response.json();
-        return output.data;
+        logger.syncOperation('create', 'deal', {
+            rentmanId: project.id,
+            hubspotId: dealId
+        }, true);
     } catch (error) {
-        console.error(`Fejl i rentmanGetFromEndpoint for ${endpoint} (forsøg ${attempt}):`, error);
+        logger.error('Fejl i syncDeal', {
+            error: error.message,
+            stack: error.stack
+        });
         throw error;
     }
 }
 
-async function hubspotCreateDeal(deal, company, contact) {
-    const url = `${HUBSPOT_ENDPOINT}0-3`
+async function updateDeal(webhook, isFromRequest = false) {
+    logger.info('updateDeal funktion kaldet');
 
-    let dealstage;
-    const total_price = sanitizeNumber(deal.project_total_price)
+    try {
+        const projectRef = webhook.items[0].ref;
+        const project = await rentman.getProjectByRef(projectRef);
 
-    const usageStart = new Date(deal.usageperiod_start);
-    const usageEnd = new Date(deal.usageperiod_start);
-    const plannedStart = new Date(deal.planperiod_start);
-    const plannedEnd = new Date(deal.planperiod_end);
-    const createDate = new Date(deal.created)
-    const todayDate = new Date(); // dags dato
+        if (!project) {
+            logger.error('Kunne ikke hente projekt fra Rentman', { ref: projectRef });
+            return;
+        }
 
-    const body = {
-        properties: {
-            dealname: deal.displayname,
-            dealstage: "appointmentscheduled",
-            usage_period: usageStart,
-            slut_projekt_period: usageEnd,
-            amount: total_price,
-            start_planning_period: plannedStart,
-            slut_planning_period: plannedEnd,
-            rentman_database_id: deal.number
-        },
-        createdAt: createDate,
-        associations: []
-    };
+        const [subProjects, contactInfo, customerInfo] = await Promise.all([
+            rentman.getProjectSubprojects(projectRef),
+            rentman.getContactByRef(project.customer),
+            rentman.getContactPersonByRef(project.cust_contact)
+        ]);
 
-    if (deal.account_manager) {
-        const crewSplit = deal.account_manager.split("/").pop();
-        const crewId = Number(crewSplit);
-
-        accountManager = userFromSql.find(
-            row => row.rentman_id.toString() === crewId.toString()
+        const hubspotDeal = await retry(
+            () => db.findSyncedDealByRentmanId(project.id),
+            { maxAttempts: 3, delayMs: 3000 }
         );
 
-        if (accountManager) {
-            body.properties.hubspot_owner_id = accountManager.hubspot_id;
-            console.log(`IGANG | Tilføjet ${accountManager.navn} til deal ${deal.displayname}`);
+        if (!hubspotDeal) {
+            logger.warn('Ingen HubSpot deal fundet', { rentmanProjectId: project.id });
+            return;
         }
-    }
 
-    if (company) {
-        body.associations.push({
-            to: { id: company },
-            types: [{
-                associationCategory: "HUBSPOT_DEFINED",
-                associationTypeId: 5
-            }]
+        logger.info('Fandt HubSpot deal', {
+            rentmanId: project.id,
+            hubspotId: hubspotDeal.hubspot_project_id
         });
-    }
-    if (contact) {
-        body.associations.push({
-            to: { id: contact },
-            types: [{
-                associationCategory: "HUBSPOT_DEFINED",
-                associationTypeId: 3
-            }]
-        });
-    }
 
+        const oldCompanyDb = await db.findSyncedCompanyByRentmanId(hubspotDeal.synced_companies_id);
+        const oldContactDb = await db.findSyncedContactByRentmanId(hubspotDeal.synced_contact_id);
 
-    const response = await fetch(url, {
-        method: "POST",
-        headers: {
-            'Content-Type': 'application/json',
-            "Accept": "application/json",
-            "Authorization": `Bearer ${HUBSPOT_TOKEN}`,
-        },
-        body: JSON.stringify(body),
-    });
+        const isCustomerSame = oldCompanyDb?.rentman_id === contactInfo?.id;
+        const isContactSame = oldContactDb?.rentman_id === customerInfo?.id;
+        const shouldUpdateAssociations = !isCustomerSame || !isContactSame || isFromRequest;
 
-    if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`HTTP error! status: ${response.status}, message: ${errText}`);
-    }
-
-    const output = await response.json();
-    return output.properties.hs_object_id;
-}
-
-
-async function syncDeal(webhook) {
-    console.log('SyncDeal funktion kaldet!')
-    const project = await rentmanGetFromEndpoint(webhook.items[0].ref)
-    const [projectInfo, contactInfo, customerInfo] = await Promise.all([
-        rentmanGetFromEndpoint(`${webhook.items[0].ref}`),
-        rentmanGetFromEndpoint(project.customer),
-        rentmanGetFromEndpoint(project.cust_contact)
-    ]);
-    let deal_id;
-
-    if (contactInfo.id) {
-        const [companyRows] = await pool.execute(`SELECT * FROM synced_companies WHERE rentman_id = ?`, [contactInfo.id]);
-        if (customerInfo.id) {
-            const [contactRows] = await pool.execute(`SELECT * FROM synced_contacts WHERE rentman_id = ?`, [customerInfo.id]);
-            console.log(`Opretter deal ${project.displayname} med virksomhed og kontaktperson`);
-
-            deal_id = await hubspotCreateDeal(projectInfo, companyRows?.[0]?.hubspot_id, contactRows?.[0]?.hubspot_id)
-            
-            await pool.query(
-                'INSERT INTO synced_deals (project_name, rentman_project_id, hubspot_project_id, synced_companies_id, synced_contact_id) VALUES (?, ?, ?, ?, ?)',
-                [project.displayname, projectInfo.id, deal_id, companyRows[0].id, contactRows[0].id]
-            );
-
-        } else {
-            console.log(`Opretter deal ${project.displayname} uden kontaktperson`);
-
-            deal_id = await hubspotCreateDeal(projectInfo, companyRows?.[0]?.hubspot_id)
-            await pool.query(
-                'INSERT INTO synced_deals (project_name, rentman_project_id, hubspot_project_id, synced_companies_id) VALUES (?, ?, ?, ?)',
-                [project.displayname, projectInfo.id, deal_id, companyRows[0].id]
+        if (shouldUpdateAssociations) {
+            await updateDealAssociations(
+                hubspotDeal,
+                contactInfo,
+                customerInfo,
+                subProjects || []
             );
         }
 
-    } else {
-        console.log(`Opretter deal ${project.displayname} uden virksomhed`);
+        await updateHubSpotDealProperties(hubspotDeal.hubspot_project_id, project);
 
-        deal_id = await hubspotCreateDeal(projectInfo)
-
-        await pool.query(
-            'INSERT INTO synced_deals (project_name, rentman_project_id, hubspot_project_id) VALUES (?, ?, ?)',
-            [project.displayname, projectInfo.id, deal_id]
-        );
+        logger.syncOperation('update', 'deal', {
+            rentmanId: project.id,
+            hubspotId: hubspotDeal.hubspot_project_id
+        }, true);
+    } catch (error) {
+        logger.error('Fejl i updateDeal', {
+            error: error.message,
+            stack: error.stack
+        });
+        throw error;
     }
-
-
 }
 
-async function hubspotUpdateDealAssociation(object, id, association, type, sql) {
-    if (association === null) { return false }
-    let associationObject;
-    if (type === 3 || type === 507) { associationObject = "contacts" }
-    if (type === 5 || type === 509) { associationObject = "company" }
-    console.log(`TILFØJER ASSOCIATION deal ${id} med ${associationObject} med id ${association} type ${type}`)
-    let url = `${HUBSPOT_ENDPOINT}${object}/${id}/associations/${associationObject}/${association}/${type}`
+async function createHubSpotDeal(project, companyId = null, contactId = null) {
+    const users = await db.getSyncedUsers();
+    let ownerId = null;
 
-    const response = await fetch(url, {
-        method: "PUT",
-        headers: {
-            'Content-Type': 'application/json',
-            "Accept": "application/json",
-            "Authorization": `Bearer ${HUBSPOT_TOKEN}`,
+    if (project.account_manager) {
+        const crewId = extractIdFromRef(project.account_manager);
+        const user = users.find(u => u.rentman_id?.toString() === crewId?.toString());
+        if (user) {
+            ownerId = user.hubspot_id;
+            logger.info('Tilfojet account manager til deal', {
+                name: user.navn,
+                dealname: project.displayname
+            });
         }
-    });
-
-    if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`HTTP error! status: ${response.status}, message: ${errText}`);
-    }
-    let database;
-    if (type === 3 || type === 507) {
-        if (object === "deals") { database = "synced_deals" }
-        if (object === "orders") { database = "synced_order" }
-        await pool.query(
-            'UPDATE synced_deals SET synced_contact_id = ? WHERE hubspot_project_id = ?',
-            [sql, id]
-        );
     }
 
-    if (type === 5 || type === 509) {
-        if (object === "deals") { database = "synced_deals" }
-        if (object === "orders") { database = "synced_order" }
-        await pool.query(
-            'UPDATE synced_deals SET synced_companies_id = ? WHERE hubspot_project_id = ?',
-            [sql, id]
-        );
-    }
-
-}
-
-async function hubspotDeleteDealAssociation(object, id, association, type) {
-    if (association === null) { return false }
-    let associationObject;
-    if (type === 3 || type === 507) { associationObject = "contacts" }
-    if (type === 5 || type === 509) { associationObject = "company" }
-    console.log(`FJERNER ASSOCIATION deal ${id} med ${associationObject} med id ${association} type ${type}`)
-    let url = `${HUBSPOT_ENDPOINT}${object}/${id}/associations/${associationObject}/${association}/${type}`
-
-    const response = await fetch(url, {
-        method: "DELETE",
-        headers: {
-            'Content-Type': 'application/json',
-            "Accept": "application/json",
-            "Authorization": `Bearer ${HUBSPOT_TOKEN}`,
-        }
-    });
-
-    if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`HTTP error! status: ${response.status}, message: ${errText}`);
-    }
-}
-
-async function hubspotUpdateDeal(id, deal) {
-
-    let url = `${HUBSPOT_ENDPOINT}0-3/${id}`
-
-    let dealstage;
-    const total_price = sanitizeNumber(deal.project_total_price)
-
-    const usageStart = new Date(deal.usageperiod_start);
-    const usageEnd = new Date(deal.usageperiod_end);
-    const plannedStart = new Date(deal.planperiod_start);
-    const plannedEnd = new Date(deal.planperiod_end);
-    const createDate = new Date(deal.created)
-    const todayDate = new Date(); // dags dato
-    const link = `https://tourcare2.rentmanapp.com/#/projects/${deal.id}/details`
-
-    const body = {
-        properties: {
-            dealname: deal.displayname,
-            dealstage,
-            usage_period: usageStart,
-            slut_projekt_period: usageEnd,
-            amount: total_price,
-            start_planning_period: plannedStart,
-            slut_planning_period: plannedEnd,
-            opret_i_rentam_request: "Ja",
-            hidden_rentman_request: true,
-            rentman_projekt: link,
-            rentman_database_id: deal.number
-        },
-        createdAt: createDate,
+    const properties = {
+        dealname: project.displayname,
+        dealstage: 'appointmentscheduled',
+        usage_period: new Date(project.usageperiod_start),
+        slut_projekt_period: new Date(project.usageperiod_end),
+        amount: sanitizeNumber(project.project_total_price),
+        start_planning_period: new Date(project.planperiod_start),
+        slut_planning_period: new Date(project.planperiod_end),
+        rentman_database_id: project.number
     };
 
-    const status = await updateHubSpotDealStatus(id);
-    if (status) body.properties.dealstage = status;
-
-    if (deal.account_manager) {
-        const crewSplit = deal.account_manager.split("/").pop();
-        const crewId = Number(crewSplit);
-
-        accountManager = userFromSql.find(
-            row => row.rentman_id.toString() === crewId.toString()
-        );
-
-        if (accountManager) {
-            body.properties.hubspot_owner_id = accountManager.hubspot_id;
-            console.log(`IGANG | Tilføjet ${accountManager.navn} til deal ${deal.displayname}`);
-        }
+    if (ownerId) {
+        properties.hubspot_owner_id = ownerId;
     }
 
-    const response = await fetch(url, {
-        method: "PATCH",
-        headers: {
-            'Content-Type': 'application/json',
-            "Accept": "application/json",
-            "Authorization": `Bearer ${HUBSPOT_TOKEN}`,
-        },
-        body: JSON.stringify(body),
-    });
-
-    if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`HTTP error! status: ${response.status}, message: ${errText}`);
-    }
-
+    return hubspot.createDeal(properties, companyId, contactId);
 }
 
-async function updateDeal(webhook, request) {
-    console.log('updateDeal funktion kaldet!');
+async function updateHubSpotDealProperties(hubspotDealId, project) {
+    const users = await db.getSyncedUsers();
+    let ownerId = null;
 
-    // Hent projekt og relaterede data
-    const project = await rentmanGetFromEndpoint(webhook.items[0].ref);
-    const [projectInfo, subProjects, contactInfo, customerInfo] = await Promise.all([
-        rentmanGetFromEndpoint(`${webhook.items[0].ref}`),
-        rentmanGetFromEndpoint(`${webhook.items[0].ref}/subprojects`),
-        rentmanGetFromEndpoint(project.customer),
-        rentmanGetFromEndpoint(project.cust_contact)
-    ]);
-
-    // Find HubSpot deal ID med retry
-    let hubspotDeal;
-    for (let i = 0; i < 3; i++) {
-        const [rows] = await pool.execute(
-            `SELECT * FROM synced_deals WHERE rentman_project_id = ?`,
-            [project.id]
-        );
-        hubspotDeal = rows[0];
-        if (hubspotDeal) break;
-        console.log(`Ingen HubSpot deal endnu for projekt ${project.id}. Venter og prøver igen...`);
-        await new Promise(r => setTimeout(r, 3000));
+    if (project.account_manager) {
+        const crewId = extractIdFromRef(project.account_manager);
+        const user = users.find(u => u.rentman_id?.toString() === crewId?.toString());
+        if (user) {
+            ownerId = user.hubspot_id;
+        }
     }
 
-    if (!hubspotDeal) {
-        console.warn(`STOPPER → Fandt stadig ingen HubSpot ID for projekt ${project.id}`);
-        return;
-    }
-
-    console.log(`Fandt HubSpot ID for ${webhook.items[0].id} - HubSpot ID: ${hubspotDeal.hubspot_project_id}`);
-
-    // Tjek om customer eller cust_contact er opdateret
-    const [oldCompany] = await pool.execute(`SELECT * FROM synced_companies WHERE id = ?`, [hubspotDeal.synced_companies_id]);
-    const [oldContact] = await pool.execute(`SELECT * FROM synced_contacts WHERE id = ?`, [hubspotDeal.synced_contact_id]);
-    const isCustomerUpdated = oldCompany[0]?.rentman_id == contactInfo?.id;
-    const isContactUpdated = oldContact[0]?.rentman_id == customerInfo?.id;
-    const associationsUpdated = isCustomerUpdated || isContactUpdated;
-
-
-    // Hjælpefunktion til at opdatere associationer
-    const updateAssociations = async (objectType, objectId, syncedCompanyId, syncedContactId, companyAssocId, contactAssocId) => {
-        // Slet gamle associationer
-        const [oldCompany] = await pool.execute(`SELECT * FROM synced_companies WHERE id = ?`, [syncedCompanyId]);
-        await hubspotDeleteDealAssociation(objectType, objectId, oldCompany?.[0]?.hubspot_id ?? null, companyAssocId);
-
-        const [oldContact] = await pool.execute(`SELECT * FROM synced_contacts WHERE id = ?`, [syncedContactId]);
-        await hubspotDeleteDealAssociation(objectType, objectId, oldContact?.[0]?.hubspot_id ?? null, contactAssocId);
-
-        // Tilføj nye associationer hvis data findes
-        if (contactInfo.id) {
-            const [companyRows] = await pool.execute(`SELECT * FROM synced_companies WHERE rentman_id = ?`, [contactInfo.id]);
-            await hubspotUpdateDealAssociation(objectType, objectId, companyRows?.[0]?.hubspot_id ?? null, companyAssocId, companyRows?.[0]?.id ?? 0);
-            console.log(`Fandt virksomhed for ${webhook.items[0].id}`);
-        }
-
-        if (customerInfo.id) {
-            const [contactRows] = await pool.execute(`SELECT * FROM synced_contacts WHERE rentman_id = ?`, [customerInfo.id]);
-            await hubspotUpdateDealAssociation(objectType, objectId, contactRows?.[0]?.hubspot_id ?? null, contactAssocId, contactRows?.[0]?.id ?? 0);
-            console.log(`Fandt kontaktperson for ${webhook.items[0].id}`);
-        }
+    const properties = {
+        dealname: project.displayname,
+        usage_period: new Date(project.usageperiod_start),
+        slut_projekt_period: new Date(project.usageperiod_end),
+        amount: sanitizeNumber(project.project_total_price),
+        start_planning_period: new Date(project.planperiod_start),
+        slut_planning_period: new Date(project.planperiod_end),
+        opret_i_rentam_request: 'Ja',
+        hidden_rentman_request: true,
+        rentman_projekt: rentman.buildProjectUrl(project.id),
+        rentman_database_id: project.number
     };
 
-    // Opdater deal associationer kun hvis opdateret
-    if (!associationsUpdated || request) {
-        await updateAssociations("deals", hubspotDeal.hubspot_project_id, hubspotDeal.synced_companies_id, hubspotDeal.synced_contact_id, 5, 3);
-
-        // Opdater subprojekter (orders)
-        for (const sub of subProjects) {
-            let hubSub;
-            for (let i = 0; i < 3; i++) {
-                const [rows] = await pool.execute(`SELECT * FROM synced_order WHERE rentman_subproject_id = ?`, [sub.id]);
-                hubSub = rows[0];
-                if (hubSub?.hubspot_order_id) break;
-                console.log(`Kunne ikke finde ${sub.displayname} i synced_order endnu. Venter 8 sek og prøver igen...`);
-                await new Promise(r => setTimeout(r, 8000));
-            }
-
-            if (!hubSub?.hubspot_order_id) {
-                console.warn(`Fandt stadig ingen hubSub for ${sub.displayname} efter retry`);
-                continue;
-            }
-
-            await updateAssociations("orders", hubSub.hubspot_order_id, hubSub.synced_companies_id, hubSub.synced_contact_id, 509, 507);
-        }
-    } else {
-        console.log(`Ingen ændringer i customer eller cust_contact - springer association updates over.`);
+    if (ownerId) {
+        properties.hubspot_owner_id = ownerId;
     }
 
-    // Opdater dealen selv altid
-    if (hubspotDeal.hubspot_project_id) {
-        console.log(`Opdaterer deal ${webhook.items[0].id}`);
-        await hubspotUpdateDeal(hubspotDeal.hubspot_project_id, projectInfo);
+    const newStage = await calculateDealStage(hubspotDealId);
+    if (newStage) {
+        properties.dealstage = newStage;
+    }
+
+    await hubspot.updateDeal(hubspotDealId, properties);
+}
+
+async function updateDealAssociations(hubspotDeal, contactInfo, customerInfo, subProjects) {
+    const oldCompanyDb = hubspotDeal.synced_companies_id
+        ? await db.query('SELECT * FROM synced_companies WHERE id = ?', [hubspotDeal.synced_companies_id]).then(rows => rows[0])
+        : null;
+    const oldContactDb = hubspotDeal.synced_contact_id
+        ? await db.query('SELECT * FROM synced_contacts WHERE id = ?', [hubspotDeal.synced_contact_id]).then(rows => rows[0])
+        : null;
+
+    if (oldCompanyDb?.hubspot_id) {
+        await hubspot.removeAssociation('deals', hubspotDeal.hubspot_project_id, 'company', oldCompanyDb.hubspot_id, 5);
+    }
+    if (oldContactDb?.hubspot_id) {
+        await hubspot.removeAssociation('deals', hubspotDeal.hubspot_project_id, 'contacts', oldContactDb.hubspot_id, 3);
+    }
+
+    if (contactInfo?.id) {
+        const newCompanyDb = await db.findSyncedCompanyByRentmanId(contactInfo.id);
+        if (newCompanyDb?.hubspot_id) {
+            await hubspot.addAssociation('deals', hubspotDeal.hubspot_project_id, 'company', newCompanyDb.hubspot_id, 5);
+            await db.updateSyncedDealCompany(hubspotDeal.hubspot_project_id, newCompanyDb.id);
+        }
+    }
+
+    if (customerInfo?.id) {
+        const newContactDb = await db.findSyncedContactByRentmanId(customerInfo.id);
+        if (newContactDb?.hubspot_id) {
+            await hubspot.addAssociation('deals', hubspotDeal.hubspot_project_id, 'contacts', newContactDb.hubspot_id, 3);
+            await db.updateSyncedDealContact(hubspotDeal.hubspot_project_id, newContactDb.id);
+        }
+    }
+
+    for (const sub of subProjects) {
+        const hubSub = await retry(
+            () => db.findSyncedOrderByRentmanId(sub.id),
+            { maxAttempts: 3, delayMs: 8000 }
+        );
+
+        if (!hubSub?.hubspot_order_id) {
+            logger.warn('Kunne ikke finde order i database', { subprojectName: sub.displayname });
+            continue;
+        }
+
+        if (contactInfo?.id) {
+            const companyDb = await db.findSyncedCompanyByRentmanId(contactInfo.id);
+            if (companyDb?.hubspot_id) {
+                await hubspot.addAssociation('orders', hubSub.hubspot_order_id, 'company', companyDb.hubspot_id, 509);
+            }
+        }
+
+        if (customerInfo?.id) {
+            const contactDb = await db.findSyncedContactByRentmanId(customerInfo.id);
+            if (contactDb?.hubspot_id) {
+                await hubspot.addAssociation('orders', hubSub.hubspot_order_id, 'contacts', contactDb.hubspot_id, 507);
+            }
+        }
     }
 }
 
+async function calculateDealStage(hubspotDealId) {
+    const deal = await hubspot.getObject('deals', hubspotDealId, [], ['orders']);
+    const orderAssociations = deal?.associations?.orders?.results;
 
-module.exports = { syncDeal, updateDeal };
+    if (!orderAssociations || orderAssociations.length === 0) {
+        return null;
+    }
+
+    const orderStages = [];
+
+    for (const orderAssoc of orderAssociations) {
+        const order = await hubspot.getOrder(orderAssoc.id);
+        if (order?.properties?.hs_pipeline_stage) {
+            orderStages.push(order.properties.hs_pipeline_stage);
+        }
+    }
+
+    return hubspot.calculateDealStageFromOrders(orderStages);
+}
+
+module.exports = {
+    syncDeal,
+    updateDeal
+};
