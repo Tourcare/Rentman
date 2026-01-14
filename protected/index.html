@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Tourcare Email Signatur Generator</title>
     <style>
-        
+
         * {
             margin: 0;
             padding: 0;
@@ -214,21 +214,21 @@
     <script>
         const employees = [
             {"id":"1","navn":"Ali Tawfik","Fornavn":"Ali","Efternavn":"Tawfik","e_mail":"ali@tourcare.dk","job_title":"Lager","telefon":"+45 4277 4728"},
-            {"id":"2","navn":"Carl Nilsson","Fornavn":"Carl","Efternavn":"Nilsson","e_mail":"carl@tourcare.dk","job_title":"Projektleder","telefon":"+45 2364 7054"},
+            {"id":"2","navn":"Carl Nilsson","Fornavn":"Carl","Efternavn":"Nilsson","e_mail":"carl@tourcare.dk","job_title":"Booker & Artist ansvarlig","telefon":"+45 2364 7054"},
             {"id":"3","navn":"Carl-Emil Larsen","Fornavn":"Carl-Emil","Efternavn":"Larsen","e_mail":"ce@tourcare.dk","job_title":"Lager","telefon":"+45 2991 0297"},
-            {"id":"4","navn":"Emil Pallisgaard-Andersen","Fornavn":"Emil","Efternavn":"Pallisgaard-Andersen","e_mail":"emil@tourcare.dk","job_title":"Projektleder","telefon":"+45 2570 2233"},
+            {"id":"4","navn":"Emil Pallisgaard-Andersen","Fornavn":"Emil","Efternavn":"Pallisgaard-Andersen","e_mail":"emil@tourcare.dk","job_title":"Booker & Projektleder","telefon":"+45 2570 2233"},
             {"id":"5","navn":"Freja Malou Sundberg Olsen","Fornavn":"Freja Malou","Efternavn":"Sundberg Olsen","e_mail":"freja@tourcare.dk","job_title":"","telefon":""},
             {"id":"6","navn":"Henrik Skygge Rønne","Fornavn":"Henrik","Efternavn":"Skygge Rønne","e_mail":"henrik@ranmix.dk","job_title":"","telefon":""},
-            {"id":"7","navn":"Jeppe Becker","Fornavn":"Jeppe","Efternavn":"Becker","e_mail":"jeppe@tourcare.dk","job_title":"","telefon":"+4560487899"},
+            {"id":"7","navn":"Jeppe Becker","Fornavn":"Jeppe","Efternavn":"Becker","e_mail":"jeppe@tourcare.dk","job_title":"Booker","telefon":"+4560487899"},
             {"id":"8","navn":"Lars Madsen","Fornavn":"Lars","Efternavn":"Madsen","e_mail":"lars@tourcare.dk","job_title":"Lager","telefon":"+45 3136 8334"},
             {"id":"9","navn":"Loa Katrine Nissen","Fornavn":"Loa Katrine","Efternavn":"Nissen","e_mail":"loa@tourcare.dk","job_title":"Administration","telefon":"+45 5191 0051"},
             {"id":"10","navn":"Lucas Kastrup","Fornavn":"Lucas","Efternavn":"Kastrup","e_mail":"lucas@ranmix.dk","job_title":"Direktør","telefon":"+45 3227 6870"},
             {"id":"11","navn":"Peer Kastrup","Fornavn":"Peer","Efternavn":"Kastrup","e_mail":"mail@ranmix.dk","job_title":"","telefon":"+4526859804"},
-            {"id":"12","navn":"Morten Riis","Fornavn":"Morten","Efternavn":"Riis","e_mail":"morten@tourcare.dk","job_title":"Projektleder","telefon":"+45 2546 6656"},
+            {"id":"12","navn":"Morten Riis","Fornavn":"Morten","Efternavn":"Riis","e_mail":"morten@tourcare.dk","job_title":"B2B Event ansvarlig","telefon":"+45 2546 6656"},
             {"id":"13","navn":"Booking Tourcare","Fornavn":"Booking","Efternavn":"Tourcare","e_mail":"produktion@tourcare.dk","job_title":"","telefon":""},
             {"id":"14","navn":"Sofus Ellegaard","Fornavn":"Sofus","Efternavn":"Ellegaard","e_mail":"sofus@tourcare.dk","job_title":"Lager","telefon":"+45 5040 7380"},
             {"id":"15","navn":"Sylvester Erbs Ledet","Fornavn":"Sylvester","Efternavn":"Erbs Ledet","e_mail":"sylvester@tourcare.dk","job_title":"Drift & Administration","telefon":"+45 5168 6106"},
-            {"id":"16","navn":"Theo Henckel","Fornavn":"Theo","Efternavn":"Henckel","e_mail":"theo@tourcare.dk","job_title":"Projektleder","telefon":"+45 5362 1309"},
+            {"id":"16","navn":"Theo Henckel","Fornavn":"Theo","Efternavn":"Henckel","e_mail":"theo@tourcare.dk","job_title":"Booker & Projektleder","telefon":"+45 5362 1309"},
             {"id":"17","navn":"Thomas Elvius","Fornavn":"Thomas","Efternavn":"Elvius","e_mail":"thomas@tourcare.dk","job_title":"","telefon":"28769093"},
             {"id":"18","navn":"Thor Friis","Fornavn":"Thor","Efternavn":"Friis","e_mail":"thor@tourcare.dk","job_title":"Daglig Leder","telefon":"+45 2970 9062"}
         ];
@@ -259,14 +259,24 @@
 			<td style="padding-right:12px;"><a href="https://tourcare.dk"><img alt="" border="0" height="108" src="https://app-eu.xink.io/Images/Get/E19661/t.png" style="display:block;" width="108" /></a></td>
 			<td style="border-left:1px solid #000;margin-left:8px;">&nbsp;</td>
 			<td style="padding-left:8px; font-family:Arial, sans-serif; color:#000;"><span style="color:#000000;"><span style="font-size:12pt;"><strong>${employee.navn}</strong>&nbsp;</span>|<span style="font-size:10pt;">&nbsp;</span><span style="font-size:11pt;"><span style="font-size:10pt;">${jobTitle}</span></span><br />
-			<span style="font-size:9pt;">${employee.e_mail}${phone ? ' | telefon ' + phone : ''}<br />
+			<span style="font-size:9pt;">${employee.e_mail}${phone ? ' | ' + phone : ''}<br />
 			Kontor: +45 3227 6666</span><br />
 			<br />
 			<span style="font-size:8pt;">Høffdingsvej 32A, 2500 Valby | DK-40697934<br />
 			<a href="http://tourcare.dk" target="_blank">hjemmeside</a>&nbsp;(NY) | <a href="https://www.instagram.com/tourcaredk/" target="_blank">instagram</a> | <a href="https://dk.linkedin.com/company/tourcaredk" target="_blank">linkedin</a> </span> </span></td>
 		</tr>
 	</tbody>
-</table>`;
+</table>
+
+<br>
+<a href="https://tourcare.dk/opbevaring" rel="nofollow noopener noreferrer"><img alt="" src="https://app-eu.xink.io//Images/Get/E19661/e9.gif" width="400" height="100"></a>
+
+
+<p style="border-top: 1px solid grey;padding-top: 5px;font-size:9pt; font-family:Arial, sans-serif; color:#696969">
+    All prices are excluded VAT<br>
+    Confidentiality notice: This email may contain confidential information. If you are not the intended recipient, please delete it and notify the sender.
+</p>
+`;
         }
 
         selectEl.addEventListener('change', function() {
