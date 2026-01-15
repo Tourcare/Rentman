@@ -186,7 +186,8 @@ async function createHubSpotDeal(project, companyId = null, contactId = null) {
         properties.hubspot_owner_id = ownerId;
     }
 
-    return hubspot.createDeal(properties, companyId, contactId);
+    const result = await hubspot.createDeal(properties, companyId, contactId);
+    return result.id;
 }
 
 async function updateHubSpotDealProperties(hubspotDealId, project) {
