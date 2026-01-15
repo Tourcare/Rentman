@@ -4,6 +4,7 @@ const rentman = require('../lib/rentman-client');
 const { createChildLogger } = require('../lib/logger');
 const { SyncLogger } = require('./sync-logger');
 const { sanitizeNumber, extractIdFromRef } = require('../lib/utils');
+const config = require('../config');
 
 const logger = createChildLogger('sync-orders');
 
@@ -167,7 +168,7 @@ async function createHubspotOrder(rentmanSubproject, syncLogger) {
         return;
     }
 
-    const properties = mapRentmanToHubspotOrder(rentmanSubproject);
+    const properties = await mapRentmanToHubspotOrder(rentmanSubproject);
 
     const result = await hubspot.createOrder(properties);
 
@@ -196,7 +197,7 @@ async function createHubspotOrder(rentmanSubproject, syncLogger) {
 }
 
 async function updateHubspotOrder(rentmanSubproject, existingSync, syncLogger) {
-    const properties = mapRentmanToHubspotOrder(rentmanSubproject);
+    const properties = await mapRentmanToHubspotOrder(rentmanSubproject);
 
     await hubspot.updateOrder(existingSync.hubspot_order_id, properties);
 
@@ -239,16 +240,27 @@ async function updateRentmanSubproject(hubspotOrder, existingSync, syncLogger) {
     });
 }
 
-function mapRentmanToHubspotOrder(rentmanSubproject) {
-    const status = rentmanSubproject.status || 'Optie';
-    const stageId = RENTMAN_STATUS_TO_ORDER_STAGE[status] || '0';
+async function mapRentmanToHubspotOrder(rentmanSubproject) {
+    const status = await rentman.getStatus(rentmanSubproject.status);
+    const stageId = hubspot.getOrderStageFromRentmanStatus(status?.id);
+    const projectId = extractIdFromRef(rentmanSubproject.project);
 
     return {
         hs_order_name: rentmanSubproject.displayname || rentmanSubproject.name || 'Unnamed Order',
         hs_total_price: sanitizeNumber(rentmanSubproject.project_total_price) || 0,
+        hs_pipeline: config.hubspot.pipelines.orders,
         hs_pipeline_stage: stageId,
-        hs_date: rentmanSubproject.planperiod_start || null,
-        hs_end_date: rentmanSubproject.planperiod_end || null
+        start_projekt_period: rentmanSubproject.usageperiod_start,
+        slut_projekt_period: rentmanSubproject.usageperiod_end,
+        start_planning_period: rentmanSubproject.planperiod_start,
+        slut_planning_period: rentmanSubproject.planperiod_end,
+        rabat: sanitizeNumber(rentmanSubproject.discount_subproject),
+        fixed_price: rentmanSubproject.fixed_price,
+        rental_price: rentmanSubproject.project_rental_price,
+        sale_price: rentmanSubproject.project_sale_price,
+        crew_price: rentmanSubproject.project_crew_price,
+        transport_price: rentmanSubproject.project_transport_price,
+        rentman_projekt: rentman.buildProjectUrl(projectId, rentmanSubproject.id)
     };
 }
 

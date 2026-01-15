@@ -204,6 +204,7 @@ async function updateRentmanCompany(hubspotCompany, existingSync, syncLogger) {
 function mapRentmanToHubspotCompany(rentmanCompany) {
     return {
         name: rentmanCompany.displayname || rentmanCompany.name || 'Unknown',
+        cvrnummer: rentmanCompany.VAT_code || '',
         address: rentmanCompany.street || '',
         city: rentmanCompany.city || '',
         zip: rentmanCompany.postalcode || '',

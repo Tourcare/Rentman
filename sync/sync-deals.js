@@ -151,7 +151,7 @@ async function createHubspotDeal(rentmanProject, syncLogger) {
 }
 
 async function updateHubspotDeal(rentmanProject, existingSync, syncLogger) {
-    const properties = await mapRentmanToHubspotDeal(rentmanProject);
+    const properties = await mapRentmanToHubspotDeal(rentmanProject, true);
 
     await hubspot.updateDeal(existingSync.hubspot_project_id, properties);
 
@@ -237,32 +237,51 @@ async function updateRentmanProject(hubspotDeal, existingSync, syncLogger) {
     });
 }
 
-async function mapRentmanToHubspotDeal(rentmanProject) {
+async function mapRentmanToHubspotDeal(rentmanProject, isUpdate = false) {
     const syncedUsers = await db.getSyncedUsers();
     let hubspotOwnerId = null;
 
     if (rentmanProject.account_manager) {
         const accountManagerId = extractIdFromRef(rentmanProject.account_manager);
-        const userMapping = syncedUsers.find(u => u.rentman_user_id === parseInt(accountManagerId));
-        hubspotOwnerId = userMapping?.hubspot_owner_id;
+        const userMapping = syncedUsers.find(u => u.rentman_id?.toString() === accountManagerId?.toString());
+        hubspotOwnerId = userMapping?.hubspot_id;
     }
 
     const properties = {
         dealname: rentmanProject.displayname || rentmanProject.name || 'Unnamed Project',
         amount: sanitizeNumber(rentmanProject.project_total_price) || 0,
-        pipeline: config.hubspot.pipelineId
+        pipeline: config.hubspot.pipelineId,
+        rentman_database_id: rentmanProject.number
     };
+
+    if (!isUpdate) {
+        properties.dealstage = 'appointmentscheduled';
+    }
+
+    if (isUpdate) {
+        properties.opret_i_rentam_request = 'Ja';
+        properties.hidden_rentman_request = true;
+        properties.rentman_projekt = rentman.buildProjectUrl(rentmanProject.id);
+    }
 
     if (hubspotOwnerId) {
         properties.hubspot_owner_id = hubspotOwnerId;
     }
 
+    if (rentmanProject.usageperiod_start) {
+        properties.usage_period = new Date(rentmanProject.usageperiod_start);
+    }
+
+    if (rentmanProject.usageperiod_end) {
+        properties.slut_projekt_period = new Date(rentmanProject.usageperiod_end);
+    }
+
     if (rentmanProject.planperiod_start) {
-        properties.planning_period_start = rentmanProject.planperiod_start;
+        properties.start_planning_period = new Date(rentmanProject.planperiod_start);
     }
 
     if (rentmanProject.planperiod_end) {
-        properties.planning_period_end = rentmanProject.planperiod_end;
+        properties.slut_planning_period = new Date(rentmanProject.planperiod_end);
     }
 
     return properties;
