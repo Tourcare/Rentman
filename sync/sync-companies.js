@@ -140,11 +140,11 @@ async function createHubspotCompany(rentmanCompany, syncLogger) {
 async function updateHubspotCompany(rentmanCompany, existingSync, syncLogger) {
     const properties = mapRentmanToHubspotCompany(rentmanCompany);
 
-    await hubspot.updateCompany(existingSync.hubspot_company_id, properties);
+    await hubspot.updateCompany(existingSync.hubspot_id, properties);
 
     await syncLogger.logItem(
         'company',
-        existingSync.hubspot_company_id,
+        existingSync.hubspot_id,
         String(rentmanCompany.id),
         'update',
         'success',
@@ -153,7 +153,7 @@ async function updateHubspotCompany(rentmanCompany, existingSync, syncLogger) {
 
     logger.debug('Updated HubSpot company from Rentman', {
         rentmanId: rentmanCompany.id,
-        hubspotId: existingSync.hubspot_company_id
+        hubspotId: existingSync.hubspot_id
     });
 }
 
@@ -182,14 +182,27 @@ async function createRentmanCompany(hubspotCompany, syncLogger) {
 }
 
 async function updateRentmanCompany(hubspotCompany, existingSync, syncLogger) {
+    if (!existingSync?.rentman_id) {
+        logger.warn('Ingen rentman_id fundet for company', { hubspotId: hubspotCompany.id });
+        await syncLogger.logItem(
+            'company',
+            hubspotCompany.id,
+            null,
+            'skip',
+            'skipped',
+            { errorMessage: 'No rentman_id in sync record' }
+        );
+        return;
+    }
+
     const contactData = mapHubspotToRentmanCompany(hubspotCompany);
 
-    await rentman.put(`/contacts/${existingSync.rentman_contact_id}`, contactData);
+    await rentman.put(`/contacts/${existingSync.rentman_id}`, contactData);
 
     await syncLogger.logItem(
         'company',
         hubspotCompany.id,
-        String(existingSync.rentman_contact_id),
+        String(existingSync.rentman_id),
         'update',
         'success',
         { dataAfter: contactData }
@@ -197,7 +210,7 @@ async function updateRentmanCompany(hubspotCompany, existingSync, syncLogger) {
 
     logger.debug('Updated Rentman contact from HubSpot', {
         hubspotId: hubspotCompany.id,
-        rentmanId: existingSync.rentman_contact_id
+        rentmanId: existingSync.rentman_id
     });
 }
 
@@ -216,15 +229,19 @@ function mapRentmanToHubspotCompany(rentmanCompany) {
 
 function mapHubspotToRentmanCompany(hubspotCompany) {
     const props = hubspotCompany.properties || {};
-    return {
-        displayname: props.name || 'Unknown',
-        street: props.address || '',
-        city: props.city || '',
-        postalcode: props.zip || '',
-        country: props.country || '',
-        phone: props.phone || '',
-        website: props.website || props.domain || ''
+    const data = {
+        displayname: props.name || 'Unknown'
     };
+
+    // Only include fields with actual values - Rentman rejects empty strings for enum fields like country
+    if (props.address) data.street = props.address;
+    if (props.city) data.city = props.city;
+    if (props.zip) data.postalcode = props.zip;
+    if (props.country) data.country = props.country.toLowerCase();
+    if (props.phone) data.phone = props.phone;
+    if (props.website || props.domain) data.website = props.website || props.domain;
+
+    return data;
 }
 
 async function handleItemError(syncLogger, itemType, hubspotId, rentmanId, error, sourceSystem) {

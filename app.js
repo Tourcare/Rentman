@@ -91,7 +91,6 @@ app.get('/me', (req, res) => {
     }
     res.json({ username: req.session.user.username });
 });
-
 const authMiddleware = (req, res, next) => {
     if (req.session.user) {
         return next();

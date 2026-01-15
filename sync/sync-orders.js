@@ -215,12 +215,28 @@ async function updateHubspotOrder(rentmanSubproject, existingSync, syncLogger) {
         hubspotId: existingSync.hubspot_order_id
     });
 
-    if (existingSync.hubspot_deal_id) {
-        await updateParentDealStatus(existingSync.hubspot_deal_id);
+    if (existingSync.synced_deals_id) {
+        const hubspotDealId = await db.getHubspotDealIdForOrder(rentmanSubproject.id);
+        if (hubspotDealId) {
+            await updateParentDealStatus(hubspotDealId);
+        }
     }
 }
 
 async function updateRentmanSubproject(hubspotOrder, existingSync, syncLogger) {
+    if (!existingSync?.rentman_subproject_id) {
+        logger.warn('Ingen rentman_subproject_id fundet for order', { hubspotId: hubspotOrder.id });
+        await syncLogger.logItem(
+            'order',
+            hubspotOrder.id,
+            null,
+            'skip',
+            'skipped',
+            { errorMessage: 'No rentman_subproject_id in sync record' }
+        );
+        return;
+    }
+
     const subprojectData = mapHubspotToRentmanSubproject(hubspotOrder);
 
     await rentman.put(`/subprojects/${existingSync.rentman_subproject_id}`, subprojectData);

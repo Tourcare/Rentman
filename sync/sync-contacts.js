@@ -132,7 +132,7 @@ async function createHubspotContact(rentmanContact, syncLogger) {
     const existingByEmail = await hubspot.findContactByEmail(email);
     if (existingByEmail) {
         await db.addSyncedContact(rentmanContact.id, existingByEmail.id);
-        await updateHubspotContact(rentmanContact, { hubspot_contact_id: existingByEmail.id }, syncLogger);
+        await updateHubspotContact(rentmanContact, { hubspot_id: existingByEmail.id }, syncLogger);
         return;
     }
 
@@ -144,8 +144,8 @@ async function createHubspotContact(rentmanContact, syncLogger) {
         const parentContactId = extractIdFromRef(rentmanContact.contact);
         if (parentContactId) {
             const parentSync = await db.findSyncedCompanyByRentmanId(parentContactId);
-            if (parentSync?.hubspot_company_id) {
-                await hubspot.associateContactToCompany(result.id, parentSync.hubspot_company_id);
+            if (parentSync?.hubspot_id) {
+                await hubspot.associateContactToCompany(result.id, parentSync.hubspot_id);
             }
         }
 
@@ -168,11 +168,11 @@ async function createHubspotContact(rentmanContact, syncLogger) {
 async function updateHubspotContact(rentmanContact, existingSync, syncLogger) {
     const properties = mapRentmanToHubspotContact(rentmanContact);
 
-    await hubspot.updateContact(existingSync.hubspot_contact_id, properties);
+    await hubspot.updateContact(existingSync.hubspot_id, properties);
 
     await syncLogger.logItem(
         'contact',
-        existingSync.hubspot_contact_id,
+        existingSync.hubspot_id,
         String(rentmanContact.id),
         'update',
         'success',
@@ -181,7 +181,7 @@ async function updateHubspotContact(rentmanContact, existingSync, syncLogger) {
 
     logger.debug('Updated HubSpot contact from Rentman', {
         rentmanId: rentmanContact.id,
-        hubspotId: existingSync.hubspot_contact_id
+        hubspotId: existingSync.hubspot_id
     });
 }
 
@@ -207,7 +207,7 @@ async function createRentmanContact(hubspotContact, syncLogger) {
     if (associations?.results?.length > 0) {
         const hubspotCompanyId = associations.results[0].id;
         const companySync = await db.findSyncedCompanyByHubspotId(hubspotCompanyId);
-        parentContactId = companySync?.rentman_contact_id;
+        parentContactId = companySync?.rentman_id;
     }
 
     if (!parentContactId) {
@@ -246,14 +246,27 @@ async function createRentmanContact(hubspotContact, syncLogger) {
 }
 
 async function updateRentmanContact(hubspotContact, existingSync, syncLogger) {
+    if (!existingSync?.rentman_id) {
+        logger.warn('Ingen rentman_id fundet for contact', { hubspotId: hubspotContact.id });
+        await syncLogger.logItem(
+            'contact',
+            hubspotContact.id,
+            null,
+            'skip',
+            'skipped',
+            { errorMessage: 'No rentman_id in sync record' }
+        );
+        return;
+    }
+
     const contactData = mapHubspotToRentmanContact(hubspotContact);
 
-    await rentman.put(`/contactpersons/${existingSync.rentman_contact_id}`, contactData);
+    await rentman.put(`/contactpersons/${existingSync.rentman_id}`, contactData);
 
     await syncLogger.logItem(
         'contact',
         hubspotContact.id,
-        String(existingSync.rentman_contact_id),
+        String(existingSync.rentman_id),
         'update',
         'success',
         { dataAfter: contactData }
@@ -261,7 +274,7 @@ async function updateRentmanContact(hubspotContact, existingSync, syncLogger) {
 
     logger.debug('Updated Rentman contact person from HubSpot', {
         hubspotId: hubspotContact.id,
-        rentmanId: existingSync.rentman_contact_id
+        rentmanId: existingSync.rentman_id
     });
 }
 

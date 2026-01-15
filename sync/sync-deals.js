@@ -129,8 +129,8 @@ async function createHubspotDeal(rentmanProject, syncLogger) {
         const contactId = extractIdFromRef(rentmanProject.contact);
         if (contactId) {
             const companySync = await db.findSyncedCompanyByRentmanId(contactId);
-            if (companySync?.hubspot_company_id) {
-                await hubspot.associateDealToCompany(result.id, companySync.hubspot_company_id);
+            if (companySync?.hubspot_id) {
+                await hubspot.associateDealToCompany(result.id, companySync.hubspot_id);
             }
         }
 
@@ -179,7 +179,7 @@ async function createRentmanProject(hubspotDeal, syncLogger) {
     if (associations?.results?.length > 0) {
         const hubspotCompanyId = associations.results[0].id;
         const companySync = await db.findSyncedCompanyByHubspotId(hubspotCompanyId);
-        rentmanContactId = companySync?.rentman_contact_id;
+        rentmanContactId = companySync?.rentman_id;
     }
 
     if (!rentmanContactId) {
@@ -218,6 +218,19 @@ async function createRentmanProject(hubspotDeal, syncLogger) {
 }
 
 async function updateRentmanProject(hubspotDeal, existingSync, syncLogger) {
+    if (!existingSync?.rentman_project_id) {
+        logger.warn('Ingen rentman_project_id fundet for deal', { hubspotId: hubspotDeal.id });
+        await syncLogger.logItem(
+            'deal',
+            hubspotDeal.id,
+            null,
+            'skip',
+            'skipped',
+            { errorMessage: 'No rentman_project_id in sync record' }
+        );
+        return;
+    }
+
     const projectData = mapHubspotToRentmanProject(hubspotDeal);
 
     await rentman.put(`/projects/${existingSync.rentman_project_id}`, projectData);

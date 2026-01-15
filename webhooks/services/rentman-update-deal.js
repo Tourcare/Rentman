@@ -44,8 +44,8 @@ async function syncDeal(webhook) {
                     project.displayname,
                     project.id,
                     dealId,
-                    companyDb?.id || null,
-                    contactDb?.id || null
+                    companyDb?.id || 0,
+                    contactDb?.id || 0
                 );
             } else {
                 logger.info('Opretter deal uden kontaktperson', {
@@ -58,8 +58,8 @@ async function syncDeal(webhook) {
                     project.displayname,
                     project.id,
                     dealId,
-                    companyDb?.id || null,
-                    null
+                    companyDb?.id || 0,
+                    0
                 );
             }
         } else {
@@ -73,8 +73,8 @@ async function syncDeal(webhook) {
                 project.displayname,
                 project.id,
                 dealId,
-                null,
-                null
+                0,
+                0
             );
         }
 
