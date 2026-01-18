@@ -40,13 +40,13 @@ async function syncDeal(webhook) {
 
                 dealId = await createHubSpotDeal(project, companyDb?.hubspot_id, contactDb?.hubspot_id);
 
-                await db.insertSyncedDeal(
-                    project.displayname,
-                    project.id,
-                    dealId,
-                    companyDb?.id || null,
-                    contactDb?.id || null
-                );
+                await db.addSyncedDeal(project.id, dealId);
+                if (companyDb?.id) {
+                    await db.updateSyncedDealCompany(dealId, companyDb.id);
+                }
+                if (contactDb?.id) {
+                    await db.updateSyncedDealContact(dealId, contactDb.id);
+                }
             } else {
                 logger.info('Opretter deal uden kontaktperson', {
                     dealname: project.displayname
@@ -54,13 +54,10 @@ async function syncDeal(webhook) {
 
                 dealId = await createHubSpotDeal(project, companyDb?.hubspot_id);
 
-                await db.insertSyncedDeal(
-                    project.displayname,
-                    project.id,
-                    dealId,
-                    companyDb?.id || null,
-                    null
-                );
+                await db.addSyncedDeal(project.id, dealId);
+                if (companyDb?.id) {
+                    await db.updateSyncedDealCompany(dealId, companyDb.id);
+                }
             }
         } else {
             logger.info('Opretter deal uden virksomhed', {
@@ -69,13 +66,7 @@ async function syncDeal(webhook) {
 
             dealId = await createHubSpotDeal(project);
 
-            await db.insertSyncedDeal(
-                project.displayname,
-                project.id,
-                dealId,
-                null,
-                null
-            );
+            await db.addSyncedDeal(project.id, dealId);
         }
 
         logger.syncOperation('create', 'deal', {

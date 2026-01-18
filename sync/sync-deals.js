@@ -10,22 +10,19 @@ const logger = createChildLogger('sync-deals');
 
 async function syncDeals(options = {}) {
     const {
-        direction = 'bidirectional',
         batchSize = 50,
         triggeredBy = 'system'
     } = options;
+
+    // Deals/projects kan kun synkroniseres fra Rentman til HubSpot
+    // Rentman API understøtter ikke create/update af projects
+    const direction = 'rentman_to_hubspot';
 
     const syncLogger = new SyncLogger('deal', direction, triggeredBy);
     await syncLogger.start({ batchSize, options });
 
     try {
-        if (direction === 'rentman_to_hubspot' || direction === 'bidirectional') {
-            await syncRentmanToHubspot(syncLogger, batchSize);
-        }
-
-        if (direction === 'hubspot_to_rentman' || direction === 'bidirectional') {
-            await syncHubspotToRentman(syncLogger, batchSize);
-        }
+        await syncRentmanToHubspot(syncLogger, batchSize);
 
         await syncLogger.complete();
         return syncLogger.getStats();
@@ -74,47 +71,6 @@ async function syncRentmanToHubspot(syncLogger, batchSize) {
 
         offset += batchSize;
         hasMore = projects.data.length === batchSize;
-    }
-}
-
-async function syncHubspotToRentman(syncLogger, batchSize) {
-    logger.info('Starting HubSpot to Rentman deal sync');
-
-    let after = undefined;
-    let hasMore = true;
-
-    while (hasMore) {
-        const response = await hubspot.searchDeals({
-            limit: batchSize,
-            after,
-            properties: [
-                'dealname', 'amount', 'dealstage', 'pipeline',
-                'planning_period_start', 'planning_period_end',
-                'hubspot_owner_id', 'closedate'
-            ]
-        });
-
-        if (!response?.results || response.results.length === 0) {
-            hasMore = false;
-            break;
-        }
-
-        for (const hubspotDeal of response.results) {
-            try {
-                const existingSync = await db.findSyncedDealByHubspotId(hubspotDeal.id);
-
-                if (existingSync) {
-                    await updateRentmanProject(hubspotDeal, existingSync, syncLogger);
-                } else {
-                    await createRentmanProject(hubspotDeal, syncLogger);
-                }
-            } catch (error) {
-                await handleItemError(syncLogger, 'deal', hubspotDeal.id, null, error, 'hubspot');
-            }
-        }
-
-        after = response.paging?.next?.after;
-        hasMore = !!after;
     }
 }
 
@@ -170,73 +126,6 @@ async function updateHubspotDeal(rentmanProject, existingSync, syncLogger) {
     });
 }
 
-async function createRentmanProject(hubspotDeal, syncLogger) {
-    const props = hubspotDeal.properties || {};
-
-    const associations = await hubspot.getDealAssociations(hubspotDeal.id, 'companies');
-    let rentmanContactId = null;
-
-    if (associations?.results?.length > 0) {
-        const hubspotCompanyId = associations.results[0].id;
-        const companySync = await db.findSyncedCompanyByHubspotId(hubspotCompanyId);
-        rentmanContactId = companySync?.rentman_contact_id;
-    }
-
-    if (!rentmanContactId) {
-        await syncLogger.logItem(
-            'deal',
-            hubspotDeal.id,
-            null,
-            'skip',
-            'skipped',
-            { errorMessage: 'No associated company found in Rentman' }
-        );
-        return;
-    }
-
-    const projectData = mapHubspotToRentmanProject(hubspotDeal, rentmanContactId);
-
-    const result = await rentman.post('/projects', projectData);
-
-    if (result?.data?.id) {
-        await db.addSyncedDeal(result.data.id, hubspotDeal.id);
-
-        await syncLogger.logItem(
-            'deal',
-            hubspotDeal.id,
-            String(result.data.id),
-            'create',
-            'success',
-            { dataAfter: projectData }
-        );
-
-        logger.info('Created Rentman project from HubSpot', {
-            hubspotId: hubspotDeal.id,
-            rentmanId: result.data.id
-        });
-    }
-}
-
-async function updateRentmanProject(hubspotDeal, existingSync, syncLogger) {
-    const projectData = mapHubspotToRentmanProject(hubspotDeal);
-
-    await rentman.put(`/projects/${existingSync.rentman_project_id}`, projectData);
-
-    await syncLogger.logItem(
-        'deal',
-        hubspotDeal.id,
-        String(existingSync.rentman_project_id),
-        'update',
-        'success',
-        { dataAfter: projectData }
-    );
-
-    logger.debug('Updated Rentman project from HubSpot', {
-        hubspotId: hubspotDeal.id,
-        rentmanId: existingSync.rentman_project_id
-    });
-}
-
 async function mapRentmanToHubspotDeal(rentmanProject) {
     const syncedUsers = await db.getSyncedUsers();
     let hubspotOwnerId = null;
@@ -266,28 +155,6 @@ async function mapRentmanToHubspotDeal(rentmanProject) {
     }
 
     return properties;
-}
-
-function mapHubspotToRentmanProject(hubspotDeal, rentmanContactId = null) {
-    const props = hubspotDeal.properties || {};
-
-    const data = {
-        displayname: props.dealname || 'Unnamed Deal'
-    };
-
-    if (rentmanContactId) {
-        data.contact = `/contacts/${rentmanContactId}`;
-    }
-
-    if (props.planning_period_start) {
-        data.planperiod_start = props.planning_period_start;
-    }
-
-    if (props.planning_period_end) {
-        data.planperiod_end = props.planning_period_end;
-    }
-
-    return data;
 }
 
 async function handleItemError(syncLogger, itemType, hubspotId, rentmanId, error, sourceSystem) {
@@ -346,7 +213,8 @@ function categorizeError(error) {
 }
 
 async function syncSingleDeal(rentmanId = null, hubspotId = null) {
-    const syncLogger = new SyncLogger('deal', 'bidirectional', 'manual');
+    // Deals/projects kan kun synkroniseres fra Rentman til HubSpot
+    const syncLogger = new SyncLogger('deal', 'rentman_to_hubspot', 'manual');
     await syncLogger.start({ rentmanId, hubspotId, singleItem: true });
     syncLogger.stats.totalItems = 1;
 
@@ -362,14 +230,25 @@ async function syncSingleDeal(rentmanId = null, hubspotId = null) {
                 }
             }
         } else if (hubspotId) {
-            const hubspotDeal = await hubspot.getDeal(hubspotId);
-            if (hubspotDeal) {
-                const existingSync = await db.findSyncedDealByHubspotId(hubspotId);
-                if (existingSync) {
-                    await updateRentmanProject(hubspotDeal, existingSync, syncLogger);
-                } else {
-                    await createRentmanProject(hubspotDeal, syncLogger);
-                }
+            // Kan ikke synkronisere fra HubSpot til Rentman - tjek kun om den findes
+            const existingSync = await db.findSyncedDealByHubspotId(hubspotId);
+            if (existingSync) {
+                logger.info('HubSpot deal er allerede synkroniseret', {
+                    hubspotId,
+                    rentmanId: existingSync.rentman_project_id
+                });
+            } else {
+                logger.info('HubSpot deal ikke fundet i Rentman - kan ikke oprettes via API', {
+                    hubspotId
+                });
+                await syncLogger.logItem(
+                    'deal',
+                    hubspotId,
+                    null,
+                    'skip',
+                    'skipped',
+                    { errorMessage: 'Rentman API understøtter ikke oprettelse af projects' }
+                );
             }
         }
 

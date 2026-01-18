@@ -7,6 +7,39 @@ const { sanitizeNumber } = require('../lib/utils');
 
 const logger = createChildLogger('sync-companies');
 
+// Country name to ISO code mapping (common countries)
+const COUNTRY_NAME_TO_CODE = {
+    'afghanistan': 'af', 'albania': 'al', 'algeria': 'dz', 'argentina': 'ar',
+    'australia': 'au', 'austria': 'at', 'belgium': 'be', 'brazil': 'br',
+    'bulgaria': 'bg', 'canada': 'ca', 'chile': 'cl', 'china': 'cn',
+    'colombia': 'co', 'croatia': 'hr', 'czech republic': 'cz', 'czechia': 'cz',
+    'denmark': 'dk', 'egypt': 'eg', 'estonia': 'ee', 'finland': 'fi',
+    'france': 'fr', 'germany': 'de', 'greece': 'gr', 'hong kong': 'hk',
+    'hungary': 'hu', 'iceland': 'is', 'india': 'in', 'indonesia': 'id',
+    'ireland': 'ie', 'israel': 'il', 'italy': 'it', 'japan': 'jp',
+    'latvia': 'lv', 'lithuania': 'lt', 'luxembourg': 'lu', 'malaysia': 'my',
+    'mexico': 'mx', 'netherlands': 'nl', 'new zealand': 'nz', 'norway': 'no',
+    'pakistan': 'pk', 'peru': 'pe', 'philippines': 'ph', 'poland': 'pl',
+    'portugal': 'pt', 'romania': 'ro', 'russia': 'ru', 'saudi arabia': 'sa',
+    'singapore': 'sg', 'slovakia': 'sk', 'slovenia': 'si', 'south africa': 'za',
+    'south korea': 'kr', 'spain': 'es', 'sweden': 'se', 'switzerland': 'ch',
+    'taiwan': 'tw', 'thailand': 'th', 'turkey': 'tr', 'ukraine': 'ua',
+    'united arab emirates': 'ae', 'uae': 'ae', 'united kingdom': 'gb', 'uk': 'gb',
+    'great britain': 'gb', 'united states': 'us', 'usa': 'us', 'vietnam': 'vn'
+};
+
+function convertCountryToCode(country) {
+    if (!country) return '';
+
+    // Already a 2-letter code
+    if (country.length === 2) {
+        return country.toLowerCase();
+    }
+
+    const normalized = country.toLowerCase().trim();
+    return COUNTRY_NAME_TO_CODE[normalized] || '';
+}
+
 async function syncCompanies(options = {}) {
     const {
         direction = 'bidirectional',
@@ -215,15 +248,23 @@ function mapRentmanToHubspotCompany(rentmanCompany) {
 
 function mapHubspotToRentmanCompany(hubspotCompany) {
     const props = hubspotCompany.properties || {};
-    return {
+    const countryCode = convertCountryToCode(props.country);
+
+    const data = {
         displayname: props.name || 'Unknown',
         street: props.address || '',
         city: props.city || '',
         postalcode: props.zip || '',
-        country: props.country || '',
         phone: props.phone || '',
         website: props.website || props.domain || ''
     };
+
+    // Only include country if we have a valid code
+    if (countryCode) {
+        data.country = countryCode;
+    }
+
+    return data;
 }
 
 async function handleItemError(syncLogger, itemType, hubspotId, rentmanId, error, sourceSystem) {

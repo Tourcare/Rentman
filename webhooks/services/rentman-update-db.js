@@ -16,6 +16,11 @@ async function handleDashboardWebhook(webhookData) {
         for (const item of items) {
             const subprojectId = item.id;
 
+            if (subprojectId === undefined || subprojectId === null) {
+                logger.warn('Springer over item uden ID', { item });
+                continue;
+            }
+
             logger.debug('Behandler dashboard event', { eventType, subprojectId });
 
             if (eventType === 'delete') {

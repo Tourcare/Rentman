@@ -14,31 +14,21 @@ const RENTMAN_STATUS_TO_ORDER_STAGE = {
     'Geannuleerd': '3'
 };
 
-const ORDER_STAGE_TO_RENTMAN_STATUS = {
-    '0': 'Optie',
-    '1': 'Bevestigd',
-    '2': 'Offerte',
-    '3': 'Geannuleerd'
-};
-
 async function syncOrders(options = {}) {
     const {
-        direction = 'bidirectional',
         batchSize = 50,
         triggeredBy = 'system'
     } = options;
+
+    // Orders/subprojects kan kun synkroniseres fra Rentman til HubSpot
+    // Rentman API understøtter ikke create/update af subprojects
+    const direction = 'rentman_to_hubspot';
 
     const syncLogger = new SyncLogger('order', direction, triggeredBy);
     await syncLogger.start({ batchSize, options });
 
     try {
-        if (direction === 'rentman_to_hubspot' || direction === 'bidirectional') {
-            await syncRentmanToHubspot(syncLogger, batchSize);
-        }
-
-        if (direction === 'hubspot_to_rentman' || direction === 'bidirectional') {
-            await syncHubspotToRentman(syncLogger, batchSize);
-        }
+        await syncRentmanToHubspot(syncLogger, batchSize);
 
         await syncLogger.complete();
         return syncLogger.getStats();
@@ -87,56 +77,6 @@ async function syncRentmanToHubspot(syncLogger, batchSize) {
 
         offset += batchSize;
         hasMore = subprojects.data.length === batchSize;
-    }
-}
-
-async function syncHubspotToRentman(syncLogger, batchSize) {
-    logger.info('Starting HubSpot to Rentman order sync');
-
-    let after = undefined;
-    let hasMore = true;
-
-    while (hasMore) {
-        const response = await hubspot.searchOrders({
-            limit: batchSize,
-            after,
-            properties: [
-                'hs_order_name', 'hs_total_price', 'hs_pipeline_stage',
-                'hs_date', 'hs_end_date'
-            ]
-        });
-
-        if (!response?.results || response.results.length === 0) {
-            hasMore = false;
-            break;
-        }
-
-        for (const hubspotOrder of response.results) {
-            try {
-                const existingSync = await db.findSyncedOrderByHubspotId(hubspotOrder.id);
-
-                if (existingSync) {
-                    await updateRentmanSubproject(hubspotOrder, existingSync, syncLogger);
-                } else {
-                    logger.debug('HubSpot order without Rentman link - skipping', {
-                        hubspotId: hubspotOrder.id
-                    });
-                    await syncLogger.logItem(
-                        'order',
-                        hubspotOrder.id,
-                        null,
-                        'skip',
-                        'skipped',
-                        { errorMessage: 'No linked Rentman subproject' }
-                    );
-                }
-            } catch (error) {
-                await handleItemError(syncLogger, 'order', hubspotOrder.id, null, error, 'hubspot');
-            }
-        }
-
-        after = response.paging?.next?.after;
-        hasMore = !!after;
     }
 }
 
@@ -219,26 +159,6 @@ async function updateHubspotOrder(rentmanSubproject, existingSync, syncLogger) {
     }
 }
 
-async function updateRentmanSubproject(hubspotOrder, existingSync, syncLogger) {
-    const subprojectData = mapHubspotToRentmanSubproject(hubspotOrder);
-
-    await rentman.put(`/subprojects/${existingSync.rentman_subproject_id}`, subprojectData);
-
-    await syncLogger.logItem(
-        'order',
-        hubspotOrder.id,
-        String(existingSync.rentman_subproject_id),
-        'update',
-        'success',
-        { dataAfter: subprojectData }
-    );
-
-    logger.debug('Updated Rentman subproject from HubSpot', {
-        hubspotId: hubspotOrder.id,
-        rentmanId: existingSync.rentman_subproject_id
-    });
-}
-
 function mapRentmanToHubspotOrder(rentmanSubproject) {
     const status = rentmanSubproject.status || 'Optie';
     const stageId = RENTMAN_STATUS_TO_ORDER_STAGE[status] || '0';
@@ -249,19 +169,6 @@ function mapRentmanToHubspotOrder(rentmanSubproject) {
         hs_pipeline_stage: stageId,
         hs_date: rentmanSubproject.planperiod_start || null,
         hs_end_date: rentmanSubproject.planperiod_end || null
-    };
-}
-
-function mapHubspotToRentmanSubproject(hubspotOrder) {
-    const props = hubspotOrder.properties || {};
-    const stageId = props.hs_pipeline_stage || '0';
-    const status = ORDER_STAGE_TO_RENTMAN_STATUS[stageId] || 'Optie';
-
-    return {
-        displayname: props.hs_order_name || 'Unnamed Order',
-        status: status,
-        planperiod_start: props.hs_date || null,
-        planperiod_end: props.hs_end_date || null
     };
 }
 
@@ -354,7 +261,8 @@ function categorizeError(error) {
 }
 
 async function syncSingleOrder(rentmanId = null, hubspotId = null) {
-    const syncLogger = new SyncLogger('order', 'bidirectional', 'manual');
+    // Orders/subprojects kan kun synkroniseres fra Rentman til HubSpot
+    const syncLogger = new SyncLogger('order', 'rentman_to_hubspot', 'manual');
     await syncLogger.start({ rentmanId, hubspotId, singleItem: true });
     syncLogger.stats.totalItems = 1;
 
@@ -370,12 +278,25 @@ async function syncSingleOrder(rentmanId = null, hubspotId = null) {
                 }
             }
         } else if (hubspotId) {
-            const hubspotOrder = await hubspot.getOrder(hubspotId);
-            if (hubspotOrder) {
-                const existingSync = await db.findSyncedOrderByHubspotId(hubspotId);
-                if (existingSync) {
-                    await updateRentmanSubproject(hubspotOrder, existingSync, syncLogger);
-                }
+            // Kan ikke synkronisere fra HubSpot til Rentman - tjek kun om den findes
+            const existingSync = await db.findSyncedOrderByHubspotId(hubspotId);
+            if (existingSync) {
+                logger.info('HubSpot order er allerede synkroniseret', {
+                    hubspotId,
+                    rentmanId: existingSync.rentman_subproject_id
+                });
+            } else {
+                logger.info('HubSpot order ikke fundet i Rentman - kan ikke oprettes via API', {
+                    hubspotId
+                });
+                await syncLogger.logItem(
+                    'order',
+                    hubspotId,
+                    null,
+                    'skip',
+                    'skipped',
+                    { errorMessage: 'Rentman API understøtter ikke oprettelse af subprojects' }
+                );
             }
         }
 
