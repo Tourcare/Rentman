@@ -87,16 +87,16 @@ async function createCompanyFromRentman(item) {
 
     logger.info('Opretter virksomhed', { name: contactData.displayname });
 
-    const companyId = await hubspot.createCompany({
+    const companyResult = await hubspot.createCompany({
         name: contactData.displayname,
         cvrnummer: contactData.VAT_code || ''
     });
 
-    await db.upsertSyncedCompany(contactData.displayname, contactData.id, companyId);
+    await db.upsertSyncedCompany(contactData.displayname, contactData.id, companyResult.id);
 
     logger.syncOperation('create', 'company', {
         rentmanId: contactData.id,
-        hubspotId: companyId
+        hubspotId: companyResult.id
     }, true);
 }
 
@@ -126,23 +126,23 @@ async function createContactPersonFromRentman(item) {
     logger.info('Opretter kontaktperson', { name: personData.displayname });
 
     const email = sanitizeEmail(personData.email);
-    const contactId = await hubspot.createContact({
+    const contactResult = await hubspot.createContact({
         email: email,
         lastname: formatContactName(null, personData.middle_name, personData.lastname),
         firstname: personData.firstname || ''
     }, companyDb.hubspot_id);
 
-    if (contactId) {
+    if (contactResult?.id) {
         await db.upsertSyncedContact(
             personData.displayname,
             personData.id,
-            contactId,
+            contactResult.id,
             companyDb.hubspot_id
         );
 
         logger.syncOperation('create', 'contact_person', {
             rentmanId: personData.id,
-            hubspotId: contactId
+            hubspotId: contactResult.id
         }, true);
     }
 }

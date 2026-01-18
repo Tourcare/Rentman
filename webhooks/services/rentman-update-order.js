@@ -177,7 +177,8 @@ async function createHubSpotOrder(subproject, dealId, companyId, contactId) {
         rentman_projekt: rentman.buildProjectUrl(projectId, subproject.id)
     };
 
-    const orderId = await hubspot.createOrder(properties, dealId, companyId, contactId);
+    const orderResult = await hubspot.createOrder(properties, dealId, companyId, contactId);
+    const orderId = orderResult.id;
 
     if (dealId) {
         await updateDealStatusAfterOrderCreate(dealId);

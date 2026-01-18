@@ -40,13 +40,13 @@ async function syncDeal(webhook) {
 
                 dealId = await createHubSpotDeal(project, companyDb?.hubspot_id, contactDb?.hubspot_id);
 
-                await db.addSyncedDeal(project.id, dealId);
-                if (companyDb?.id) {
-                    await db.updateSyncedDealCompany(dealId, companyDb.id);
-                }
-                if (contactDb?.id) {
-                    await db.updateSyncedDealContact(dealId, contactDb.id);
-                }
+                await db.insertSyncedDeal(
+                    project.displayname,
+                    project.id,
+                    dealId,
+                    companyDb?.id || 0,
+                    contactDb?.id || 0
+                );
             } else {
                 logger.info('Opretter deal uden kontaktperson', {
                     dealname: project.displayname
@@ -54,10 +54,13 @@ async function syncDeal(webhook) {
 
                 dealId = await createHubSpotDeal(project, companyDb?.hubspot_id);
 
-                await db.addSyncedDeal(project.id, dealId);
-                if (companyDb?.id) {
-                    await db.updateSyncedDealCompany(dealId, companyDb.id);
-                }
+                await db.insertSyncedDeal(
+                    project.displayname,
+                    project.id,
+                    dealId,
+                    companyDb?.id || 0,
+                    0
+                );
             }
         } else {
             logger.info('Opretter deal uden virksomhed', {
@@ -66,7 +69,13 @@ async function syncDeal(webhook) {
 
             dealId = await createHubSpotDeal(project);
 
-            await db.addSyncedDeal(project.id, dealId);
+            await db.insertSyncedDeal(
+                project.displayname,
+                project.id,
+                dealId,
+                0,
+                0
+            );
         }
 
         logger.syncOperation('create', 'deal', {
@@ -177,7 +186,8 @@ async function createHubSpotDeal(project, companyId = null, contactId = null) {
         properties.hubspot_owner_id = ownerId;
     }
 
-    return hubspot.createDeal(properties, companyId, contactId);
+    const result = await hubspot.createDeal(properties, companyId, contactId);
+    return result.id;
 }
 
 async function updateHubSpotDealProperties(hubspotDealId, project) {
