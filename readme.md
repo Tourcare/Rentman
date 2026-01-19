@@ -1,3 +1,1 @@
-Alt skal omskrives :,)
-Det noget rod
-kh
+nu det godt nok
