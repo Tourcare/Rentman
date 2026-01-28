@@ -3,7 +3,7 @@ const hubspot = require('../lib/hubspot-client');
 const rentman = require('../lib/rentman-client');
 const { createChildLogger } = require('../lib/logger');
 const { SyncLogger } = require('./sync-logger');
-const { sanitizeNumber } = require('../lib/utils');
+const { sanitizeNumber, sanitizeEmail } = require('../lib/utils');
 
 const logger = createChildLogger('sync-companies');
 
@@ -173,6 +173,9 @@ async function createHubspotCompany(rentmanCompany, syncLogger) {
             rentmanId: rentmanCompany.id,
             hubspotId: result.id
         });
+
+        // Sync tilhørende contactpersons
+        await syncCompanyContactPersons(rentmanCompany.id, result.id, syncLogger);
     }
 }
 
@@ -198,6 +201,159 @@ async function updateHubspotCompany(rentmanCompany, existingSync, syncLogger) {
 
     logger.debug('Updated HubSpot company from Rentman', {
         rentmanId: rentmanCompany.id,
+        hubspotId: existingSync.hubspot_id
+    });
+
+    // Sync tilhørende contactpersons
+    await syncCompanyContactPersons(rentmanCompany.id, existingSync.hubspot_id, syncLogger);
+}
+
+/**
+ * Syncer alle contactpersons for en company.
+ * Kaldes efter company create/update.
+ */
+async function syncCompanyContactPersons(rentmanCompanyId, hubspotCompanyId, syncLogger) {
+    try {
+        // Hent alle contactpersons for denne company
+        const contactPersons = await rentman.get(`/contacts/${rentmanCompanyId}/contactpersons`);
+
+        if (!contactPersons || !Array.isArray(contactPersons) || contactPersons.length === 0) {
+            logger.debug('Ingen contactpersons fundet for company', { companyId: rentmanCompanyId });
+            return;
+        }
+
+        logger.info('Syncer contactpersons for company', {
+            companyId: rentmanCompanyId,
+            count: contactPersons.length
+        });
+
+        for (const person of contactPersons) {
+            try {
+                const existingContactSync = await db.findSyncedContactByRentmanId(person.id);
+
+                if (existingContactSync) {
+                    // Opdater eksisterende contact
+                    await updateContactPerson(person, existingContactSync, hubspotCompanyId, syncLogger);
+                } else {
+                    // Opret ny contact
+                    await createContactPerson(person, rentmanCompanyId, hubspotCompanyId, syncLogger);
+                }
+            } catch (error) {
+                logger.error('Fejl ved sync af contactperson', {
+                    personId: person.id,
+                    error: error.message
+                });
+                await syncLogger.logItem(
+                    'contact',
+                    null,
+                    String(person.id),
+                    'error',
+                    'failed',
+                    { errorMessage: error.message }
+                );
+            }
+        }
+    } catch (error) {
+        logger.error('Fejl ved hentning af contactpersons', {
+            companyId: rentmanCompanyId,
+            error: error.message
+        });
+    }
+}
+
+async function createContactPerson(person, rentmanCompanyId, hubspotCompanyId, syncLogger) {
+    const email = sanitizeEmail(person.email);
+
+    if (!email) {
+        await syncLogger.logItem(
+            'contact',
+            null,
+            String(person.id),
+            'skip',
+            'skipped',
+            { errorMessage: 'No valid email address' }
+        );
+        return;
+    }
+
+    // Tjek om contact allerede eksisterer i HubSpot via email
+    const existingByEmail = await hubspot.findContactByEmail(email);
+    if (existingByEmail) {
+        await db.upsertSyncedContact(
+            person.displayname,
+            person.id,
+            existingByEmail.id,
+            hubspotCompanyId
+        );
+        logger.info('Contact fundet via email - linket', {
+            rentmanId: person.id,
+            hubspotId: existingByEmail.id
+        });
+        return;
+    }
+
+    const properties = {
+        firstname: person.firstname || '',
+        lastname: person.lastname || '',
+        email: email,
+        phone: person.phone || '',
+        mobilephone: person.mobilephone || '',
+        jobtitle: person.function || ''
+    };
+
+    const result = await hubspot.createContact(properties, hubspotCompanyId);
+
+    if (result?.id) {
+        await db.upsertSyncedContact(
+            person.displayname,
+            person.id,
+            result.id,
+            hubspotCompanyId
+        );
+
+        await syncLogger.logItem(
+            'contact',
+            result.id,
+            String(person.id),
+            'create',
+            'success',
+            { dataAfter: properties }
+        );
+
+        logger.info('Created HubSpot contact from contactperson', {
+            rentmanId: person.id,
+            hubspotId: result.id,
+            companyId: hubspotCompanyId
+        });
+    }
+}
+
+async function updateContactPerson(person, existingSync, hubspotCompanyId, syncLogger) {
+    const email = sanitizeEmail(person.email);
+
+    const properties = {
+        firstname: person.firstname || '',
+        lastname: person.lastname || '',
+        email: email || '',
+        phone: person.phone || '',
+        mobilephone: person.mobilephone || '',
+        jobtitle: person.function || ''
+    };
+
+    await hubspot.updateContact(existingSync.hubspot_id, properties);
+    await db.updateSyncedContactName(person.id, person.displayname);
+
+    await syncLogger.logItem(
+        'contact',
+        existingSync.hubspot_id,
+        String(person.id),
+        'update',
+        'success',
+        { dataAfter: properties }
+    );
+
+    logger.debug('Updated HubSpot contact from contactperson', {
+        rentmanId: person.id,
         hubspotId: existingSync.hubspot_id
     });
 }

@@ -58,6 +58,13 @@ async function syncRentmanToHubspot(syncLogger, batchSize) {
 
         for (const rentmanProject of projects) {
             try {
+                // Skip "internal subrental" projekter
+                const projectName = (rentmanProject.displayname || rentmanProject.name || '').toLowerCase();
+                if (projectName.includes('internal subrental')) {
+                    logger.debug('Skipper internal subrental projekt', { id: rentmanProject.id, name: projectName });
+                    continue;
+                }
+
                 const existingSync = await db.findSyncedDealByRentmanId(rentmanProject.id);
 
                 if (existingSync) {
@@ -123,6 +130,9 @@ async function createHubspotDeal(rentmanProject, syncLogger) {
             companyId: companySync?.hubspot_id,
             contactId: contactSync?.hubspot_id
         });
+
+        // Sync tilhørende subprojects (orders)
+        await syncProjectSubprojects(rentmanProject.id, result.id, companySync, contactSync, syncLogger);
     }
 }
 
@@ -143,6 +153,199 @@ async function updateHubspotDeal(rentmanProject, existingSync, syncLogger) {
     logger.debug('Updated HubSpot deal from Rentman', {
         rentmanId: rentmanProject.id,
         hubspotId: existingSync.hubspot_project_id
+    });
+
+    // Sync tilhørende subprojects (orders)
+    const customerId = extractIdFromRef(rentmanProject.customer);
+    const custContactId = extractIdFromRef(rentmanProject.cust_contact);
+
+    let companySync = null;
+    let contactSync = null;
+
+    if (customerId) {
+        companySync = await db.findSyncedCompanyByRentmanId(customerId);
+    }
+    if (custContactId) {
+        contactSync = await db.findSyncedContactByRentmanId(custContactId);
+    }
+
+    await syncProjectSubprojects(rentmanProject.id, existingSync.hubspot_project_id, companySync, contactSync, syncLogger);
+}
+
+/**
+ * Syncer alle subprojects (orders) for et projekt.
+ * Kaldes efter deal create/update.
+ */
+async function syncProjectSubprojects(rentmanProjectId, hubspotDealId, companySync, contactSync, syncLogger) {
+    try {
+        const subprojects = await rentman.getProjectSubprojects(`/projects/${rentmanProjectId}`);
+
+        if (!subprojects || !Array.isArray(subprojects) || subprojects.length === 0) {
+            logger.debug('Ingen subprojects fundet for projekt', { projectId: rentmanProjectId });
+            return;
+        }
+
+        logger.info('Syncer subprojects for projekt', {
+            projectId: rentmanProjectId,
+            count: subprojects.length
+        });
+
+        for (const subproject of subprojects) {
+            try {
+                // Skip "internal subrental" subprojects
+                const subprojectName = (subproject.displayname || subproject.name || '').toLowerCase();
+                if (subprojectName.includes('internal subrental')) {
+                    logger.debug('Skipper internal subrental subproject', { id: subproject.id, name: subprojectName });
+                    continue;
+                }
+
+                const existingOrderSync = await db.findSyncedOrderByRentmanId(subproject.id);
+
+                if (existingOrderSync) {
+                    // Opdater eksisterende order
+                    await updateSubprojectOrder(subproject, existingOrderSync, syncLogger);
+                } else {
+                    // Opret ny order
+                    await createSubprojectOrder(subproject, hubspotDealId, companySync, contactSync, syncLogger);
+                }
+            } catch (error) {
+                logger.error('Fejl ved sync af subproject', {
+                    subprojectId: subproject.id,
+                    error: error.message
+                });
+                await syncLogger.logItem(
+                    'order',
+                    null,
+                    String(subproject.id),
+                    'error',
+                    'failed',
+                    { errorMessage: error.message }
+                );
+            }
+        }
+    } catch (error) {
+        logger.error('Fejl ved hentning af subprojects', {
+            projectId: rentmanProjectId,
+            error: error.message
+        });
+    }
+}
+
+async function createSubprojectOrder(subproject, hubspotDealId, companySync, contactSync, syncLogger) {
+    // Hent status fra Rentman API
+    const status = await rentman.getStatus(subproject.status);
+    const stageId = hubspot.getOrderStageFromRentmanStatus(status?.id);
+    const projectId = extractIdFromRef(subproject.project);
+
+    const properties = {
+        hs_order_name: subproject.displayname || subproject.name || 'Unnamed Order',
+        hs_total_price: sanitizeNumber(subproject.project_total_price) || 0,
+        hs_pipeline: config.hubspot?.pipelines?.orders,
+        hs_pipeline_stage: stageId,
+        start_projekt_period: subproject.usageperiod_start || null,
+        slut_projekt_period: subproject.usageperiod_end || null,
+        start_planning_period: subproject.planperiod_start || null,
+        slut_planning_period: subproject.planperiod_end || null,
+        rabat: sanitizeNumber(subproject.discount_subproject),
+        fixed_price: subproject.fixed_price,
+        rental_price: subproject.project_rental_price,
+        sale_price: subproject.project_sale_price,
+        crew_price: subproject.project_crew_price,
+        transport_price: subproject.project_transport_price,
+        rentman_projekt: rentman.buildProjectUrl ? rentman.buildProjectUrl(projectId, subproject.id) : null
+    };
+
+    const result = await hubspot.createOrder(
+        properties,
+        hubspotDealId,
+        companySync?.hubspot_id || null,
+        contactSync?.hubspot_id || null
+    );
+
+    if (result?.id) {
+        const dealSync = await db.findSyncedDealByHubspotId(hubspotDealId);
+
+        await db.insertSyncedOrder(
+            subproject.displayname,
+            subproject.id,
+            result.id,
+            companySync?.id || 0,
+            contactSync?.id || 0,
+            dealSync?.id || null
+        );
+
+        // Opdater dashboard database
+        if (projectId) {
+            const projectData = await rentman.getProject(projectId);
+            if (projectData) {
+                await db.upsertDashboardSubproject({ data: subproject }, { data: projectData });
+            }
+        }
+
+        await syncLogger.logItem(
+            'order',
+            result.id,
+            String(subproject.id),
+            'create',
+            'success',
+            { dataAfter: properties }
+        );
+
+        logger.info('Created HubSpot order from subproject', {
+            rentmanId: subproject.id,
+            hubspotId: result.id,
+            dealId: hubspotDealId
+        });
+    }
+}
+
+async function updateSubprojectOrder(subproject, existingSync, syncLogger) {
+    // Hent status fra Rentman API
+    const status = await rentman.getStatus(subproject.status);
+    const stageId = hubspot.getOrderStageFromRentmanStatus(status?.id);
+    const projectId = extractIdFromRef(subproject.project);
+
+    const properties = {
+        hs_order_name: subproject.displayname || subproject.name || 'Unnamed Order',
+        hs_total_price: sanitizeNumber(subproject.project_total_price) || 0,
+        hs_pipeline: config.hubspot?.pipelines?.orders,
+        hs_pipeline_stage: stageId,
+        start_projekt_period: subproject.usageperiod_start || null,
+        slut_projekt_period: subproject.usageperiod_end || null,
+        start_planning_period: subproject.planperiod_start || null,
+        slut_planning_period: subproject.planperiod_end || null,
+        rabat: sanitizeNumber(subproject.discount_subproject),
+        fixed_price: subproject.fixed_price,
+        rental_price: subproject.project_rental_price,
+        sale_price: subproject.project_sale_price,
+        crew_price: subproject.project_crew_price,
+        transport_price: subproject.project_transport_price,
+        rentman_projekt: rentman.buildProjectUrl ? rentman.buildProjectUrl(projectId, subproject.id) : null
+    };
+
+    await hubspot.updateOrder(existingSync.hubspot_order_id, properties);
+    await db.updateSyncedOrderName(subproject.id, subproject.displayname);
+
+    // Opdater dashboard database
+    if (projectId) {
+        const projectData = await rentman.getProject(projectId);
+        if (projectData) {
+            await db.upsertDashboardSubproject({ data: subproject }, { data: projectData });
+        }
+    }
+
+    await syncLogger.logItem(
+        'order',
+        existingSync.hubspot_order_id,
+        String(subproject.id),
+        'update',
+        'success',
+        { dataAfter: properties }
+    );
+
+    logger.debug('Updated HubSpot order from subproject', {
+        rentmanId: subproject.id,
+        hubspotId: existingSync.hubspot_order_id
     });
 }
 

@@ -58,6 +58,13 @@ async function syncRentmanToHubspot(syncLogger, batchSize) {
 
         for (const rentmanSubproject of subprojects) {
             try {
+                // Skip "internal subrental" subprojects
+                const subprojectName = (rentmanSubproject.displayname || rentmanSubproject.name || '').toLowerCase();
+                if (subprojectName.includes('internal subrental')) {
+                    logger.debug('Skipper internal subrental subproject', { id: rentmanSubproject.id, name: subprojectName });
+                    continue;
+                }
+
                 const existingSync = await db.findSyncedOrderByRentmanId(rentmanSubproject.id);
 
                 if (existingSync) {
