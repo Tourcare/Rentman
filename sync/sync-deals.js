@@ -349,8 +349,9 @@ async function updateSubprojectOrder(subproject, existingSync, syncLogger) {
     });
 }
 
-async function mapRentmanToHubspotDeal(rentmanProject) {
+async function mapRentmanToHubspotDeal(rentmanData) {
     const syncedUsers = await db.getSyncedUsers();
+    const rentmanProject = await rentman.getProject(rentmanData.id)
     let hubspotOwnerId = null;
 
     if (rentmanProject.account_manager) {
