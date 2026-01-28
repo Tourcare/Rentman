@@ -81,16 +81,17 @@ async function syncRentmanToHubspot(syncLogger, batchSize) {
     let hasMore = true;
 
     while (hasMore) {
+        // rentman.get() returnerer data direkte (array), ikke { data: [...] }
         const contacts = await rentman.get(`/contacts?limit=${batchSize}&offset=${offset}`);
 
-        if (!contacts?.data || contacts.data.length === 0) {
+        if (!contacts || !Array.isArray(contacts) || contacts.length === 0) {
             hasMore = false;
             break;
         }
 
         await syncLogger.updateProgress(syncLogger.getStats().processedItems, null);
 
-        for (const rentmanCompany of contacts.data) {
+        for (const rentmanCompany of contacts) {
             try {
                 const existingSync = await db.findSyncedCompanyByRentmanId(rentmanCompany.id);
 
@@ -105,7 +106,7 @@ async function syncRentmanToHubspot(syncLogger, batchSize) {
         }
 
         offset += batchSize;
-        hasMore = contacts.data.length === batchSize;
+        hasMore = contacts.length === batchSize;
     }
 }
 
@@ -275,8 +276,9 @@ function mapHubspotToRentmanCompany(hubspotCompany) {
     const props = hubspotCompany.properties || {};
     const countryCode = convertCountryToCode(props.country);
 
+    // displayname er read-only i Rentman - brug 'name' i stedet
     const data = {
-        displayname: props.name || 'Unknown'
+        name: props.name || 'Unknown'
     };
 
     // Only include fields with actual values - Rentman rejects empty strings for enum fields like country

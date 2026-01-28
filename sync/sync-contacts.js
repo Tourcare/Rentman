@@ -48,16 +48,17 @@ async function syncRentmanToHubspot(syncLogger, batchSize) {
     let hasMore = true;
 
     while (hasMore) {
+        // rentman.get() returnerer data direkte (array), ikke { data: [...] }
         const contactPersons = await rentman.get(`/contactpersons?limit=${batchSize}&offset=${offset}`);
 
-        if (!contactPersons?.data || contactPersons.data.length === 0) {
+        if (!contactPersons || !Array.isArray(contactPersons) || contactPersons.length === 0) {
             hasMore = false;
             break;
         }
 
         await syncLogger.updateProgress(syncLogger.getStats().processedItems, null);
 
-        for (const rentmanContact of contactPersons.data) {
+        for (const rentmanContact of contactPersons) {
             try {
                 const existingSync = await db.findSyncedContactByRentmanId(rentmanContact.id);
 
@@ -72,7 +73,7 @@ async function syncRentmanToHubspot(syncLogger, batchSize) {
         }
 
         offset += batchSize;
-        hasMore = contactPersons.data.length === batchSize;
+        hasMore = contactPersons.length === batchSize;
     }
 }
 
