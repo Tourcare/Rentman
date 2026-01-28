@@ -81,6 +81,7 @@ const config = {
             lineItemToDeal: 20  // Tilføjet til line items sync
         },
         pipelines: {
+            deals: 'default',  // Brug 'default' eller indsæt specifik pipeline ID
             orders: '14a2e10e-5471-408a-906e-c51f3b04369e'
         },
         folders: {

@@ -240,7 +240,7 @@ async function createSubprojectOrder(subproject, hubspotDealId, companySync, con
     const properties = {
         hs_order_name: subproject.displayname || subproject.name || 'Unnamed Order',
         hs_total_price: sanitizeNumber(subproject.project_total_price) || 0,
-        hs_pipeline: config.hubspot?.pipelines?.orders,
+        hs_pipeline: config.hubspot.pipelines.orders,
         hs_pipeline_stage: stageId,
         start_projekt_period: subproject.usageperiod_start || null,
         slut_projekt_period: subproject.usageperiod_end || null,
@@ -308,7 +308,7 @@ async function updateSubprojectOrder(subproject, existingSync, syncLogger) {
     const properties = {
         hs_order_name: subproject.displayname || subproject.name || 'Unnamed Order',
         hs_total_price: sanitizeNumber(subproject.project_total_price) || 0,
-        hs_pipeline: config.hubspot?.pipelines?.orders,
+        hs_pipeline: config.hubspot.pipelines.orders,
         hs_pipeline_stage: stageId,
         start_projekt_period: subproject.usageperiod_start || null,
         slut_projekt_period: subproject.usageperiod_end || null,
@@ -364,10 +364,16 @@ async function mapRentmanToHubspotDeal(rentmanProject) {
 
     const properties = {
         dealname: rentmanProject.displayname || rentmanProject.name || 'Unnamed Project',
-        amount: sanitizeNumber(rentmanProject.project_total_price) || 0,
+        amount: rentmanProject.project_total_price || 0,
+        dealstage: 'appointmentscheduled',
         rentman_database_id: rentmanProject.number,
         rentman_projekt: rentman.buildProjectUrl ? rentman.buildProjectUrl(rentmanProject.id) : null
     };
+
+    // Sæt pipeline hvis konfigureret (og ikke 'default')
+    if (config.hubspot?.pipelines?.deals && config.hubspot.pipelines.deals !== 'default') {
+        properties.pipeline = config.hubspot.pipelines.deals;
+    }
 
     if (hubspotOwnerId) {
         properties.hubspot_owner_id = hubspotOwnerId;

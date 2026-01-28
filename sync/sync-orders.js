@@ -214,7 +214,7 @@ async function mapRentmanToHubspotOrder(rentmanSubproject) {
     return {
         hs_order_name: rentmanSubproject.displayname || rentmanSubproject.name || 'Unnamed Order',
         hs_total_price: sanitizeNumber(rentmanSubproject.project_total_price) || 0,
-        hs_pipeline: config.hubspot?.pipelines?.orders,
+        hs_pipeline: config.hubspot.pipelines.orders,
         hs_pipeline_stage: stageId,
         // Datofelter - samme som webhook service
         start_projekt_period: rentmanSubproject.usageperiod_start || null,
