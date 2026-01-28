@@ -360,12 +360,12 @@ async function syncSingleOrder(rentmanId = null, hubspotId = null) {
     try {
         if (rentmanId) {
             const rentmanSubproject = await rentman.getSubproject(rentmanId);
-            if (rentmanSubproject?.data) {
+            if (rentmanSubproject) {
                 const existingSync = await db.findSyncedOrderByRentmanId(rentmanId);
                 if (existingSync) {
-                    await updateHubspotOrder(rentmanSubproject.data, existingSync, syncLogger);
+                    await updateHubspotOrder(rentmanSubproject, existingSync, syncLogger);
                 } else {
-                    await createHubspotOrder(rentmanSubproject.data, syncLogger);
+                    await createHubspotOrder(rentmanSubproject, syncLogger);
                 }
             }
         } else if (hubspotId) {
@@ -414,21 +414,21 @@ async function syncOrderFinancials(rentmanSubprojectId) {
         }
 
         const rentmanSubproject = await rentman.getSubproject(rentmanSubprojectId);
-        if (!rentmanSubproject?.data) {
+        if (!rentmanSubproject) {
             await syncLogger.fail('Could not fetch Rentman subproject');
             return;
         }
 
-        const totalPrice = sanitizeNumber(rentmanSubproject.data.project_total_price);
+        const totalPrice = sanitizeNumber(rentmanSubproject.project_total_price);
 
         await hubspot.updateOrder(existingSync.hubspot_order_id, {
             hs_total_price: totalPrice
         });
 
         // Opdater dashboard database
-        const projectId = extractIdFromRef(rentmanSubproject.data.project);
+        const projectId = extractIdFromRef(rentmanSubproject.project);
         if (projectId) {
-            await updateDashboardSubproject(rentmanSubproject.data, projectId);
+            await updateDashboardSubproject(rentmanSubproject, projectId);
         }
 
         await syncLogger.logItem(

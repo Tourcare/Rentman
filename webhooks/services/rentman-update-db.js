@@ -29,12 +29,12 @@ async function handleDashboardWebhook(webhookData) {
             } else if (eventType === 'create' || eventType === 'update') {
                 const subprojectData = await rentman.getSubproject(subprojectId);
 
-                if (!subprojectData?.data) {
+                if (!subprojectData) {
                     logger.warn('Kunne ikke hente subproject data', { subprojectId });
                     continue;
                 }
 
-                const projectRef = subprojectData.data.project;
+                const projectRef = subprojectData.project;
                 const projectId = projectRef.split('/').pop();
 
                 const projectData = await rentman.getProject(projectId);
@@ -44,7 +44,7 @@ async function handleDashboardWebhook(webhookData) {
                     continue;
                 }
 
-                await db.upsertDashboardSubproject(subprojectData, { data: projectData });
+                await db.upsertDashboardSubproject({ data: subprojectData }, { data: projectData });
 
                 logger.info(`${eventType === 'create' ? 'Oprettede' : 'Opdaterede'} subproject i dashboard`, {
                     subprojectId,
