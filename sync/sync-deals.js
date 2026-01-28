@@ -231,11 +231,12 @@ async function syncProjectSubprojects(rentmanProjectId, hubspotDealId, companySy
     }
 }
 
-async function createSubprojectOrder(subproject, hubspotDealId, companySync, contactSync, syncLogger) {
+async function createSubprojectOrder(subprojectData, hubspotDealId, companySync, contactSync, syncLogger) {
     // Hent status fra Rentman API
-    const status = await rentman.getStatus(subproject.status);
+    const status = await rentman.getStatus(subprojectData.status);
     const stageId = hubspot.getOrderStageFromRentmanStatus(status?.id);
-    const projectId = extractIdFromRef(subproject.project);
+    const projectId = extractIdFromRef(subprojectData.project);
+    const subproject = await rentman.getSubproject(subprojectData.id)
 
     const properties = {
         hs_order_name: subproject.displayname || subproject.name || 'Unnamed Order',
@@ -299,11 +300,12 @@ async function createSubprojectOrder(subproject, hubspotDealId, companySync, con
     }
 }
 
-async function updateSubprojectOrder(subproject, existingSync, syncLogger) {
+async function updateSubprojectOrder(subprojectData, existingSync, syncLogger) {
     // Hent status fra Rentman API
-    const status = await rentman.getStatus(subproject.status);
+    const status = await rentman.getStatus(subprojectData.status);
     const stageId = hubspot.getOrderStageFromRentmanStatus(status?.id);
-    const projectId = extractIdFromRef(subproject.project);
+    const projectId = extractIdFromRef(subprojectData.project);
+    const subproject = await rentman.getSubproject(subprojectData.id)
 
     const properties = {
         hs_order_name: subproject.displayname || subproject.name || 'Unnamed Order',
