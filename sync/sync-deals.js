@@ -77,18 +77,35 @@ async function syncRentmanToHubspot(syncLogger, batchSize) {
 async function createHubspotDeal(rentmanProject, syncLogger) {
     const properties = await mapRentmanToHubspotDeal(rentmanProject);
 
-    const result = await hubspot.createDeal(properties);
+    // Hent company og contact til associations - samme som webhook service
+    const customerId = extractIdFromRef(rentmanProject.customer);
+    const custContactId = extractIdFromRef(rentmanProject.cust_contact);
+
+    let companySync = null;
+    let contactSync = null;
+
+    if (customerId) {
+        companySync = await db.findSyncedCompanyByRentmanId(customerId);
+    }
+    if (custContactId) {
+        contactSync = await db.findSyncedContactByRentmanId(custContactId);
+    }
+
+    // Opret deal med associations
+    const result = await hubspot.createDeal(
+        properties,
+        companySync?.hubspot_id || null,
+        contactSync?.hubspot_id || null
+    );
 
     if (result?.id) {
-        await db.addSyncedDeal(rentmanProject.id, result.id);
-
-        const contactId = extractIdFromRef(rentmanProject.contact);
-        if (contactId) {
-            const companySync = await db.findSyncedCompanyByRentmanId(contactId);
-            if (companySync?.hubspot_company_id) {
-                await hubspot.associateDealToCompany(result.id, companySync.hubspot_company_id);
-            }
-        }
+        await db.insertSyncedDeal(
+            rentmanProject.displayname,
+            rentmanProject.id,
+            result.id,
+            companySync?.id || 0,
+            contactSync?.id || 0
+        );
 
         await syncLogger.logItem(
             'deal',
@@ -101,7 +118,9 @@ async function createHubspotDeal(rentmanProject, syncLogger) {
 
         logger.info('Created HubSpot deal from Rentman', {
             rentmanId: rentmanProject.id,
-            hubspotId: result.id
+            hubspotId: result.id,
+            companyId: companySync?.hubspot_id,
+            contactId: contactSync?.hubspot_id
         });
     }
 }
@@ -132,26 +151,36 @@ async function mapRentmanToHubspotDeal(rentmanProject) {
 
     if (rentmanProject.account_manager) {
         const accountManagerId = extractIdFromRef(rentmanProject.account_manager);
-        const userMapping = syncedUsers.find(u => u.rentman_user_id === parseInt(accountManagerId));
-        hubspotOwnerId = userMapping?.hubspot_owner_id;
+        const userMapping = syncedUsers.find(u =>
+            u.rentman_id?.toString() === accountManagerId?.toString() ||
+            u.rentman_user_id === parseInt(accountManagerId)
+        );
+        hubspotOwnerId = userMapping?.hubspot_id || userMapping?.hubspot_owner_id;
     }
 
     const properties = {
         dealname: rentmanProject.displayname || rentmanProject.name || 'Unnamed Project',
         amount: sanitizeNumber(rentmanProject.project_total_price) || 0,
-        pipeline: config.hubspot.pipelineId
+        rentman_database_id: rentmanProject.number,
+        rentman_projekt: rentman.buildProjectUrl ? rentman.buildProjectUrl(rentmanProject.id) : null
     };
 
     if (hubspotOwnerId) {
         properties.hubspot_owner_id = hubspotOwnerId;
     }
 
-    if (rentmanProject.planperiod_start) {
-        properties.planning_period_start = rentmanProject.planperiod_start;
+    // Datofelter - samme som webhook service
+    if (rentmanProject.usageperiod_start) {
+        properties.usage_period = new Date(rentmanProject.usageperiod_start);
     }
-
+    if (rentmanProject.usageperiod_end) {
+        properties.slut_projekt_period = new Date(rentmanProject.usageperiod_end);
+    }
+    if (rentmanProject.planperiod_start) {
+        properties.start_planning_period = new Date(rentmanProject.planperiod_start);
+    }
     if (rentmanProject.planperiod_end) {
-        properties.planning_period_end = rentmanProject.planperiod_end;
+        properties.slut_planning_period = new Date(rentmanProject.planperiod_end);
     }
 
     return properties;

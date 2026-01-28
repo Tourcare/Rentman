@@ -152,7 +152,12 @@ async function createHubspotCompany(rentmanCompany, syncLogger) {
     const result = await hubspot.createCompany(properties);
 
     if (result?.id) {
-        await db.addSyncedCompany(rentmanCompany.id, result.id);
+        // Brug upsertSyncedCompany med navn - samme som webhook service
+        await db.upsertSyncedCompany(
+            rentmanCompany.displayname || rentmanCompany.name,
+            rentmanCompany.id,
+            result.id
+        );
 
         await syncLogger.logItem(
             'company',
@@ -174,6 +179,12 @@ async function updateHubspotCompany(rentmanCompany, existingSync, syncLogger) {
     const properties = mapRentmanToHubspotCompany(rentmanCompany);
 
     await hubspot.updateCompany(existingSync.hubspot_id, properties);
+
+    // Opdater navn i database - samme som webhook service
+    await db.updateSyncedCompanyName(
+        existingSync.hubspot_id,
+        rentmanCompany.displayname || rentmanCompany.name
+    );
 
     await syncLogger.logItem(
         'company',
@@ -265,28 +276,16 @@ function mapHubspotToRentmanCompany(hubspotCompany) {
     const countryCode = convertCountryToCode(props.country);
 
     const data = {
-        displayname: props.name || 'Unknown',
-        street: props.address || '',
-        city: props.city || '',
-        postalcode: props.zip || '',
-        phone: props.phone || '',
-        website: props.website || props.domain || ''
+        displayname: props.name || 'Unknown'
     };
 
     // Only include fields with actual values - Rentman rejects empty strings for enum fields like country
     if (props.address) data.street = props.address;
     if (props.city) data.city = props.city;
     if (props.zip) data.postalcode = props.zip;
-    if (props.country) data.country = props.country.toLowerCase();
+    if (countryCode) data.country = countryCode;
     if (props.phone) data.phone = props.phone;
     if (props.website || props.domain) data.website = props.website || props.domain;
-
-    return data;
-
-    // Only include country if we have a valid code
-    if (countryCode) {
-        data.country = countryCode;
-    }
 
     return data;
 }

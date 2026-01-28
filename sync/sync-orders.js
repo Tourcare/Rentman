@@ -4,15 +4,9 @@ const rentman = require('../lib/rentman-client');
 const { createChildLogger } = require('../lib/logger');
 const { SyncLogger } = require('./sync-logger');
 const { sanitizeNumber, extractIdFromRef } = require('../lib/utils');
+const config = require('../config');
 
 const logger = createChildLogger('sync-orders');
-
-const RENTMAN_STATUS_TO_ORDER_STAGE = {
-    'Optie': '0',
-    'Bevestigd': '1',
-    'Offerte': '2',
-    'Geannuleerd': '3'
-};
 
 async function syncOrders(options = {}) {
     const {
@@ -107,14 +101,45 @@ async function createHubspotOrder(rentmanSubproject, syncLogger) {
         return;
     }
 
-    const properties = mapRentmanToHubspotOrder(rentmanSubproject);
+    // Hent project info for at få company og contact - samme som webhook service
+    const projectInfo = await rentman.getProject(projectId);
+    let companySync = null;
+    let contactSync = null;
 
-    const result = await hubspot.createOrder(properties);
+    if (projectInfo) {
+        const customerId = extractIdFromRef(projectInfo.customer);
+        const custContactId = extractIdFromRef(projectInfo.cust_contact);
+
+        if (customerId) {
+            companySync = await db.findSyncedCompanyByRentmanId(customerId);
+        }
+        if (custContactId) {
+            contactSync = await db.findSyncedContactByRentmanId(custContactId);
+        }
+    }
+
+    const properties = await mapRentmanToHubspotOrder(rentmanSubproject);
+
+    // Opret order med alle associations - samme som webhook service
+    const result = await hubspot.createOrder(
+        properties,
+        dealSync.hubspot_project_id,
+        companySync?.hubspot_id || null,
+        contactSync?.hubspot_id || null
+    );
 
     if (result?.id) {
-        await db.addSyncedOrder(rentmanSubproject.id, result.id, dealSync.hubspot_project_id);
+        await db.insertSyncedOrder(
+            rentmanSubproject.displayname,
+            rentmanSubproject.id,
+            result.id,
+            companySync?.id || 0,
+            contactSync?.id || 0,
+            dealSync.id
+        );
 
-        await hubspot.associateOrderToDeal(result.id, dealSync.hubspot_project_id);
+        // Opdater dashboard database
+        await updateDashboardSubproject(rentmanSubproject, projectId);
 
         await syncLogger.logItem(
             'order',
@@ -128,7 +153,9 @@ async function createHubspotOrder(rentmanSubproject, syncLogger) {
         logger.info('Created HubSpot order from Rentman', {
             rentmanId: rentmanSubproject.id,
             hubspotId: result.id,
-            dealId: dealSync.hubspot_project_id
+            dealId: dealSync.hubspot_project_id,
+            companyId: companySync?.hubspot_id,
+            contactId: contactSync?.hubspot_id
         });
 
         await updateParentDealStatus(dealSync.hubspot_project_id);
@@ -136,9 +163,18 @@ async function createHubspotOrder(rentmanSubproject, syncLogger) {
 }
 
 async function updateHubspotOrder(rentmanSubproject, existingSync, syncLogger) {
-    const properties = mapRentmanToHubspotOrder(rentmanSubproject);
+    const properties = await mapRentmanToHubspotOrder(rentmanSubproject);
 
     await hubspot.updateOrder(existingSync.hubspot_order_id, properties);
+
+    // Opdater navn i database - samme som webhook service
+    await db.updateSyncedOrderName(rentmanSubproject.id, rentmanSubproject.displayname);
+
+    // Opdater dashboard database
+    const projectId = extractIdFromRef(rentmanSubproject.project);
+    if (projectId) {
+        await updateDashboardSubproject(rentmanSubproject, projectId);
+    }
 
     await syncLogger.logItem(
         'order',
@@ -154,22 +190,69 @@ async function updateHubspotOrder(rentmanSubproject, existingSync, syncLogger) {
         hubspotId: existingSync.hubspot_order_id
     });
 
-    if (existingSync.hubspot_deal_id) {
-        await updateParentDealStatus(existingSync.hubspot_deal_id);
+    // Hent deal ID via join - synced_order har kun synced_deals_id (FK)
+    const hubspotDealId = await db.getHubspotDealIdForOrder(rentmanSubproject.id);
+    if (hubspotDealId) {
+        await updateParentDealStatus(hubspotDealId);
     }
 }
 
-function mapRentmanToHubspotOrder(rentmanSubproject) {
-    const status = rentmanSubproject.status || 'Optie';
-    const stageId = RENTMAN_STATUS_TO_ORDER_STAGE[status] || '0';
+async function mapRentmanToHubspotOrder(rentmanSubproject) {
+    // Hent status fra Rentman API - samme som webhook service
+    const status = await rentman.getStatus(rentmanSubproject.status);
+    const stageId = hubspot.getOrderStageFromRentmanStatus(status?.id);
+    const projectId = extractIdFromRef(rentmanSubproject.project);
 
     return {
         hs_order_name: rentmanSubproject.displayname || rentmanSubproject.name || 'Unnamed Order',
         hs_total_price: sanitizeNumber(rentmanSubproject.project_total_price) || 0,
+        hs_pipeline: config.hubspot?.pipelines?.orders,
         hs_pipeline_stage: stageId,
-        hs_date: rentmanSubproject.planperiod_start || null,
-        hs_end_date: rentmanSubproject.planperiod_end || null
+        // Datofelter - samme som webhook service
+        start_projekt_period: rentmanSubproject.usageperiod_start || null,
+        slut_projekt_period: rentmanSubproject.usageperiod_end || null,
+        start_planning_period: rentmanSubproject.planperiod_start || null,
+        slut_planning_period: rentmanSubproject.planperiod_end || null,
+        // Prisfelter - samme som webhook service
+        rabat: sanitizeNumber(rentmanSubproject.discount_subproject),
+        fixed_price: rentmanSubproject.fixed_price,
+        rental_price: rentmanSubproject.project_rental_price,
+        sale_price: rentmanSubproject.project_sale_price,
+        crew_price: rentmanSubproject.project_crew_price,
+        transport_price: rentmanSubproject.project_transport_price,
+        // Rentman link
+        rentman_projekt: rentman.buildProjectUrl ? rentman.buildProjectUrl(projectId, rentmanSubproject.id) : null
     };
+}
+
+/**
+ * Opdaterer dashboard database med subproject data.
+ * Samme logik som rentman-update-db.js webhook handler.
+ */
+async function updateDashboardSubproject(rentmanSubproject, projectId) {
+    try {
+        const projectData = await rentman.getProject(projectId);
+        if (!projectData) {
+            logger.warn('Kunne ikke hente project data til dashboard', { projectId });
+            return;
+        }
+
+        await db.upsertDashboardSubproject(
+            { data: rentmanSubproject },
+            { data: projectData }
+        );
+
+        logger.debug('Opdaterede dashboard database', {
+            subprojectId: rentmanSubproject.id,
+            projectId
+        });
+    } catch (error) {
+        logger.error('Fejl ved opdatering af dashboard database', {
+            subprojectId: rentmanSubproject.id,
+            projectId,
+            error: error.message
+        });
+    }
 }
 
 async function updateParentDealStatus(hubspotDealId) {
@@ -333,6 +416,12 @@ async function syncOrderFinancials(rentmanSubprojectId) {
         await hubspot.updateOrder(existingSync.hubspot_order_id, {
             hs_total_price: totalPrice
         });
+
+        // Opdater dashboard database
+        const projectId = extractIdFromRef(rentmanSubproject.data.project);
+        if (projectId) {
+            await updateDashboardSubproject(rentmanSubproject.data, projectId);
+        }
 
         await syncLogger.logItem(
             'order',

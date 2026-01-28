@@ -136,18 +136,25 @@ async function createHubspotContact(rentmanContact, syncLogger) {
         return;
     }
 
-    const result = await hubspot.createContact(properties);
+    // Hent parent company for association - samme som webhook service
+    const parentContactId = extractIdFromRef(rentmanContact.contact);
+    let parentSync = null;
+
+    if (parentContactId) {
+        parentSync = await db.findSyncedCompanyByRentmanId(parentContactId);
+    }
+
+    // Opret contact med company association - samme som webhook service
+    const result = await hubspot.createContact(properties, parentSync?.hubspot_id || null);
 
     if (result?.id) {
-        await db.addSyncedContact(rentmanContact.id, result.id);
-
-        const parentContactId = extractIdFromRef(rentmanContact.contact);
-        if (parentContactId) {
-            const parentSync = await db.findSyncedCompanyByRentmanId(parentContactId);
-            if (parentSync?.hubspot_id) {
-                await hubspot.associateContactToCompany(result.id, parentSync.hubspot_id);
-            }
-        }
+        // Brug upsertSyncedContact med company ID - samme som webhook service
+        await db.upsertSyncedContact(
+            rentmanContact.displayname,
+            rentmanContact.id,
+            result.id,
+            parentSync?.hubspot_id || null
+        );
 
         await syncLogger.logItem(
             'contact',
@@ -160,7 +167,8 @@ async function createHubspotContact(rentmanContact, syncLogger) {
 
         logger.info('Created HubSpot contact from Rentman', {
             rentmanId: rentmanContact.id,
-            hubspotId: result.id
+            hubspotId: result.id,
+            companyId: parentSync?.hubspot_id
         });
     }
 }
@@ -169,6 +177,9 @@ async function updateHubspotContact(rentmanContact, existingSync, syncLogger) {
     const properties = mapRentmanToHubspotContact(rentmanContact);
 
     await hubspot.updateContact(existingSync.hubspot_id, properties);
+
+    // Opdater navn i database - samme som webhook service
+    await db.updateSyncedContactName(rentmanContact.id, rentmanContact.displayname);
 
     await syncLogger.logItem(
         'contact',
