@@ -364,7 +364,7 @@ async function mapRentmanToHubspotDeal(rentmanProject) {
 
     const properties = {
         dealname: rentmanProject.displayname || rentmanProject.name || 'Unnamed Project',
-        amount: rentmanProject.project_total_price || 0,
+        amount: sanitizeNumber(rentmanProject.project_total_price) || 0,
         dealstage: 'appointmentscheduled',
         rentman_database_id: rentmanProject.number,
         rentman_projekt: rentman.buildProjectUrl ? rentman.buildProjectUrl(rentmanProject.id) : null
@@ -392,7 +392,8 @@ async function mapRentmanToHubspotDeal(rentmanProject) {
     if (rentmanProject.planperiod_end) {
         properties.slut_planning_period = new Date(rentmanProject.planperiod_end);
     }
-
+    console.log(properties)
+    console.log(rentmanProject)
     return properties;
 }
 
