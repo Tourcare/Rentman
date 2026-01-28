@@ -83,7 +83,7 @@ async function syncRentmanToHubspot(syncLogger, batchSize) {
 }
 
 async function createHubspotDeal(rentmanProject, syncLogger) {
-    const properties = await mapRentmanToHubspotDeal(rentmanProject);
+    const properties = await mapRentmanToHubspotDeal(rentmanProject, null);
 
     // Hent company og contact til associations - samme som webhook service
     const customerId = extractIdFromRef(rentmanProject.customer);
@@ -137,7 +137,7 @@ async function createHubspotDeal(rentmanProject, syncLogger) {
 }
 
 async function updateHubspotDeal(rentmanProject, existingSync, syncLogger) {
-    const properties = await mapRentmanToHubspotDeal(rentmanProject);
+    const properties = await mapRentmanToHubspotDeal(rentmanProject, existingSync.hubspot_project_id);
 
     await hubspot.updateDeal(existingSync.hubspot_project_id, properties);
 
@@ -231,28 +231,30 @@ async function syncProjectSubprojects(rentmanProjectId, hubspotDealId, companySy
     }
 }
 
-async function createSubprojectOrder(subprojectData, hubspotDealId, companySync, contactSync, syncLogger) {
+async function createSubprojectOrder(subproject, hubspotDealId, companySync, contactSync, syncLogger) {
+    // Hent det specifikke subproject for at få alle prisfelter
+    const subprojectData = await rentman.getSubproject(subproject.id);
+
     // Hent status fra Rentman API
     const status = await rentman.getStatus(subprojectData.status);
     const stageId = hubspot.getOrderStageFromRentmanStatus(status?.id);
     const projectId = extractIdFromRef(subprojectData.project);
-    const subproject = await rentman.getSubproject(subprojectData.id)
 
     const properties = {
-        hs_order_name: subproject.displayname || subproject.name || 'Unnamed Order',
-        hs_total_price: sanitizeNumber(subproject.project_total_price) || 0,
+        hs_order_name: subprojectData.displayname || subprojectData.name || 'Unnamed Order',
+        hs_total_price: sanitizeNumber(subprojectData.project_total_price) || 0,
         hs_pipeline: config.hubspot.pipelines.orders,
         hs_pipeline_stage: stageId,
-        start_projekt_period: subproject.usageperiod_start || null,
-        slut_projekt_period: subproject.usageperiod_end || null,
-        start_planning_period: subproject.planperiod_start || null,
-        slut_planning_period: subproject.planperiod_end || null,
-        rabat: sanitizeNumber(subproject.discount_subproject),
-        fixed_price: subproject.fixed_price,
-        rental_price: subproject.project_rental_price,
-        sale_price: subproject.project_sale_price,
-        crew_price: subproject.project_crew_price,
-        transport_price: subproject.project_transport_price,
+        start_projekt_period: subprojectData.usageperiod_start || null,
+        slut_projekt_period: subprojectData.usageperiod_end || null,
+        start_planning_period: subprojectData.planperiod_start || null,
+        slut_planning_period: subprojectData.planperiod_end || null,
+        rabat: sanitizeNumber(subprojectData.discount_subproject),
+        fixed_price: subprojectData.fixed_price,
+        rental_price: subprojectData.project_rental_price,
+        sale_price: subprojectData.project_sale_price,
+        crew_price: subprojectData.project_crew_price,
+        transport_price: subprojectData.project_transport_price,
         rentman_projekt: rentman.buildProjectUrl ? rentman.buildProjectUrl(projectId, subproject.id) : null
     };
 
@@ -267,7 +269,7 @@ async function createSubprojectOrder(subprojectData, hubspotDealId, companySync,
         const dealSync = await db.findSyncedDealByHubspotId(hubspotDealId);
 
         await db.insertSyncedOrder(
-            subproject.displayname,
+            subprojectData.displayname,
             subproject.id,
             result.id,
             companySync?.id || 0,
@@ -279,7 +281,7 @@ async function createSubprojectOrder(subprojectData, hubspotDealId, companySync,
         if (projectId) {
             const projectData = await rentman.getProject(projectId);
             if (projectData) {
-                await db.upsertDashboardSubproject({ data: subproject }, { data: projectData });
+                await db.upsertDashboardSubproject({ data: subprojectData }, { data: projectData });
             }
         }
 
@@ -300,39 +302,41 @@ async function createSubprojectOrder(subprojectData, hubspotDealId, companySync,
     }
 }
 
-async function updateSubprojectOrder(subprojectData, existingSync, syncLogger) {
+async function updateSubprojectOrder(subproject, existingSync, syncLogger) {
+    // Hent det specifikke subproject for at få alle prisfelter
+    const subprojectData = await rentman.getSubproject(subproject.id);
+
     // Hent status fra Rentman API
     const status = await rentman.getStatus(subprojectData.status);
     const stageId = hubspot.getOrderStageFromRentmanStatus(status?.id);
     const projectId = extractIdFromRef(subprojectData.project);
-    const subproject = await rentman.getSubproject(subprojectData.id)
 
     const properties = {
-        hs_order_name: subproject.displayname || subproject.name || 'Unnamed Order',
-        hs_total_price: sanitizeNumber(subproject.project_total_price) || 0,
+        hs_order_name: subprojectData.displayname || subprojectData.name || 'Unnamed Order',
+        hs_total_price: sanitizeNumber(subprojectData.project_total_price) || 0,
         hs_pipeline: config.hubspot.pipelines.orders,
         hs_pipeline_stage: stageId,
-        start_projekt_period: subproject.usageperiod_start || null,
-        slut_projekt_period: subproject.usageperiod_end || null,
-        start_planning_period: subproject.planperiod_start || null,
-        slut_planning_period: subproject.planperiod_end || null,
-        rabat: sanitizeNumber(subproject.discount_subproject),
-        fixed_price: subproject.fixed_price,
-        rental_price: subproject.project_rental_price,
-        sale_price: subproject.project_sale_price,
-        crew_price: subproject.project_crew_price,
-        transport_price: subproject.project_transport_price,
+        start_projekt_period: subprojectData.usageperiod_start || null,
+        slut_projekt_period: subprojectData.usageperiod_end || null,
+        start_planning_period: subprojectData.planperiod_start || null,
+        slut_planning_period: subprojectData.planperiod_end || null,
+        rabat: sanitizeNumber(subprojectData.discount_subproject),
+        fixed_price: subprojectData.fixed_price,
+        rental_price: subprojectData.project_rental_price,
+        sale_price: subprojectData.project_sale_price,
+        crew_price: subprojectData.project_crew_price,
+        transport_price: subprojectData.project_transport_price,
         rentman_projekt: rentman.buildProjectUrl ? rentman.buildProjectUrl(projectId, subproject.id) : null
     };
 
     await hubspot.updateOrder(existingSync.hubspot_order_id, properties);
-    await db.updateSyncedOrderName(subproject.id, subproject.displayname);
+    await db.updateSyncedOrderName(subproject.id, subprojectData.displayname);
 
     // Opdater dashboard database
     if (projectId) {
         const projectData = await rentman.getProject(projectId);
         if (projectData) {
-            await db.upsertDashboardSubproject({ data: subproject }, { data: projectData });
+            await db.upsertDashboardSubproject({ data: subprojectData }, { data: projectData });
         }
     }
 
@@ -351,9 +355,9 @@ async function updateSubprojectOrder(subprojectData, existingSync, syncLogger) {
     });
 }
 
-async function mapRentmanToHubspotDeal(rentmanData) {
+async function mapRentmanToHubspotDeal(rentmanData, existingHubspotDealId = null) {
     const syncedUsers = await db.getSyncedUsers();
-    const rentmanProject = await rentman.getProject(rentmanData.id)
+    const rentmanProject = await rentman.getProject(rentmanData.id);
     let hubspotOwnerId = null;
 
     if (rentmanProject.account_manager) {
@@ -368,10 +372,20 @@ async function mapRentmanToHubspotDeal(rentmanData) {
     const properties = {
         dealname: rentmanProject.displayname || rentmanProject.name || 'Unnamed Project',
         amount: sanitizeNumber(rentmanProject.project_total_price) || 0,
-        dealstage: 'appointmentscheduled',
         rentman_database_id: rentmanProject.number,
         rentman_projekt: rentman.buildProjectUrl ? rentman.buildProjectUrl(rentmanProject.id) : null
     };
+
+    // Beregn dealstage baseret på orders (hvis deal eksisterer) eller brug default
+    if (existingHubspotDealId) {
+        const calculatedStage = await calculateDealStage(existingHubspotDealId);
+        if (calculatedStage) {
+            properties.dealstage = calculatedStage;
+        }
+    } else {
+        // Ny deal - sæt default stage
+        properties.dealstage = 'appointmentscheduled';
+    }
 
     // Sæt pipeline hvis konfigureret (og ikke 'default')
     if (config.hubspot?.pipelines?.deals && config.hubspot.pipelines.deals !== 'default') {
@@ -395,9 +409,40 @@ async function mapRentmanToHubspotDeal(rentmanData) {
     if (rentmanProject.planperiod_end) {
         properties.slut_planning_period = new Date(rentmanProject.planperiod_end);
     }
-    console.log(properties)
-    console.log(rentmanProject)
+
     return properties;
+}
+
+/**
+ * Beregner deal stage baseret på tilhørende orders' stages.
+ * Samme logik som webhook service.
+ */
+async function calculateDealStage(hubspotDealId) {
+    try {
+        const deal = await hubspot.getObject('deals', hubspotDealId, [], ['orders']);
+        const orderAssociations = deal?.associations?.orders?.results;
+
+        if (!orderAssociations || orderAssociations.length === 0) {
+            return null;
+        }
+
+        const orderStages = [];
+
+        for (const orderAssoc of orderAssociations) {
+            const order = await hubspot.getOrder(orderAssoc.id);
+            if (order?.properties?.hs_pipeline_stage) {
+                orderStages.push(order.properties.hs_pipeline_stage);
+            }
+        }
+
+        return hubspot.calculateDealStageFromOrders(orderStages);
+    } catch (error) {
+        logger.warn('Kunne ikke beregne deal stage', {
+            hubspotDealId,
+            error: error.message
+        });
+        return null;
+    }
 }
 
 async function handleItemError(syncLogger, itemType, hubspotId, rentmanId, error, sourceSystem) {
