@@ -7,7 +7,13 @@ const { sanitizeNumber, extractIdFromRef } = require('../../lib/utils');
 const logger = createChildLogger('rentman-cost');
 
 async function handleEquipmentUpdate(event) {
-    logger.info('handleEquipmentUpdate kaldet', { itemCount: event.items.length });
+    logger.info('handleEquipmentUpdate kaldet', { itemCount: event.items.length, eventType: event.eventType });
+
+    // Håndter delete events separat
+    if (event.eventType === 'delete') {
+        await handleEquipmentDelete(event);
+        return;
+    }
 
     for (const item of event.items) {
         try {
@@ -20,6 +26,9 @@ async function handleEquipmentUpdate(event) {
                 logger.warn('Kunne ikke hente equipment data', { ref: item.ref });
                 continue;
             }
+
+            // Sync equipment data til database baseret på item type
+            await syncEquipmentToDatabase(event.itemType, rentmanData);
 
             const subprojectId = extractIdFromRef(rentmanData.subproject);
             const projectId = extractIdFromRef(rentmanData.project);
@@ -59,6 +68,63 @@ async function handleEquipmentUpdate(event) {
                 itemRef: item.ref
             });
         }
+    }
+}
+
+/**
+ * Håndterer delete events for equipment.
+ * Ved delete events indeholder items kun ID'et, ikke ref.
+ */
+async function handleEquipmentDelete(event) {
+    for (const itemId of event.items) {
+        try {
+            if (event.itemType === 'ProjectEquipment') {
+                await db.deleteProjectEquipment(itemId);
+                logger.debug('Slettede project_equipment fra database', { id: itemId });
+            } else if (event.itemType === 'ProjectEquipmentGroup') {
+                await db.deleteProjectEquipmentGroup(itemId);
+                logger.debug('Slettede project_equipment_group fra database', { id: itemId });
+            }
+        } catch (error) {
+            logger.error('Fejl ved sletning af equipment fra database', {
+                error: error.message,
+                itemType: event.itemType,
+                id: itemId
+            });
+        }
+    }
+}
+
+/**
+ * Synkroniserer equipment eller equipment group data til databasen.
+ * Henter også tilhørende equipment_group data hvis det er ProjectEquipment.
+ */
+async function syncEquipmentToDatabase(itemType, rentmanData) {
+    try {
+        if (itemType === 'ProjectEquipment') {
+            // Upsert selve equipment
+            await db.upsertProjectEquipment(rentmanData);
+            logger.debug('Synkede project_equipment til database', { id: rentmanData.id });
+
+            // Hent og upsert tilhørende equipment_group hvis den findes
+            if (rentmanData.equipment_group) {
+                const groupData = await rentman.get(rentmanData.equipment_group);
+                if (groupData) {
+                    await db.upsertProjectEquipmentGroup(groupData);
+                    logger.debug('Synkede project_equipment_group til database', { id: groupData.id });
+                }
+            }
+        } else if (itemType === 'ProjectEquipmentGroup') {
+            // Upsert selve equipment group
+            await db.upsertProjectEquipmentGroup(rentmanData);
+            logger.debug('Synkede project_equipment_group til database', { id: rentmanData.id });
+        }
+    } catch (error) {
+        logger.error('Fejl ved sync af equipment til database', {
+            error: error.message,
+            itemType,
+            id: rentmanData.id
+        });
     }
 }
 
