@@ -2,7 +2,7 @@ const { createChildLogger } = require('../../lib/logger');
 const db = require('../../lib/database');
 const hubspot = require('../../lib/hubspot-client');
 const rentman = require('../../lib/rentman-client');
-const { sanitizeEmail, formatContactName, retry } = require('../../lib/utils');
+const { sanitizeEmail, formatContactName, retry, getFormatedRentmanAdress } = require('../../lib/utils');
 
 const logger = createChildLogger('rentman-contact');
 
@@ -87,9 +87,16 @@ async function createCompanyFromRentman(item) {
 
     logger.info('Opretter virksomhed', { name: contactData.displayname });
 
+    const companyAdress = getFormatedRentmanAdress(contactData.visit_street, contactData.invoice_city)
+
     const companyResult = await hubspot.createCompany({
         name: contactData.displayname,
-        cvrnummer: contactData.VAT_code || ''
+        cvrnummer: contactData.VAT_code || '',
+        city: contactData.visit_city || contactData.invoice_city || '',
+        conutry: contactData.country || '',
+        address: companyAdress || '',
+        state: contactData.invoice_state || contactData.visit_state || '',
+        hs_state_code: contactData.invoice_postalcode || contactData.invoice_postalcode || ''
     });
 
     await db.upsertSyncedCompany(contactData.displayname, contactData.id, companyResult.id);
@@ -162,9 +169,16 @@ async function updateCompanyFromRentman(item) {
 
     logger.info('Opdaterer virksomhed', { name: contactData.displayname });
 
+    const companyAdress = getFormatedRentmanAdress(contactData.visit_street, contactData.invoice_city)
+
     await hubspot.updateCompany(companyDb.hubspot_id, {
         name: contactData.displayname,
-        cvrnummer: contactData.VAT_code || ''
+        cvrnummer: contactData.VAT_code || '',
+        city: contactData.visit_city || contactData.invoice_city || '',
+        conutry: contactData.country || '',
+        address: companyAdress || '',
+        state: contactData.invoice_state || contactData.visit_state || '',
+        hs_state_code: contactData.invoice_postalcode || contactData.invoice_postalcode || ''
     });
 
     await db.updateSyncedCompanyName(companyDb.hubspot_id, contactData.displayname);
