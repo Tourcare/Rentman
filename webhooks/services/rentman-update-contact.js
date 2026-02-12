@@ -95,8 +95,7 @@ async function createCompanyFromRentman(item) {
         city: contactData.visit_city || contactData.invoice_city || '',
         country: contactData.country || '',
         address: companyAdress || '',
-        state: contactData.invoice_state || contactData.visit_state || '',
-        hs_state_code: contactData.invoice_postalcode || contactData.invoice_postalcode || ''
+        zip: contactData.invoice_postalcode || contactData.invoice_postalcode || ''
     });
 
     await db.upsertSyncedCompany(contactData.displayname, contactData.id, companyResult.id);
@@ -177,8 +176,7 @@ async function updateCompanyFromRentman(item) {
         city: contactData.visit_city || contactData.invoice_city || '',
         country: contactData.country || '',
         address: companyAdress || '',
-        state: contactData.invoice_state || contactData.visit_state || '',
-        hs_state_code: contactData.invoice_postalcode || contactData.invoice_postalcode || ''
+        zip: contactData.invoice_postalcode || contactData.invoice_postalcode || ''
     });
 
     await db.updateSyncedCompanyName(companyDb.hubspot_id, contactData.displayname);
