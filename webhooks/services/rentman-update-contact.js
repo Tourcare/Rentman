@@ -93,7 +93,7 @@ async function createCompanyFromRentman(item) {
         name: contactData.displayname,
         cvrnummer: contactData.VAT_code || '',
         city: contactData.visit_city || contactData.invoice_city || '',
-        conutry: contactData.country || '',
+        country: contactData.country || '',
         address: companyAdress || '',
         state: contactData.invoice_state || contactData.visit_state || '',
         hs_state_code: contactData.invoice_postalcode || contactData.invoice_postalcode || ''
@@ -175,7 +175,7 @@ async function updateCompanyFromRentman(item) {
         name: contactData.displayname,
         cvrnummer: contactData.VAT_code || '',
         city: contactData.visit_city || contactData.invoice_city || '',
-        conutry: contactData.country || '',
+        country: contactData.country || '',
         address: companyAdress || '',
         state: contactData.invoice_state || contactData.visit_state || '',
         hs_state_code: contactData.invoice_postalcode || contactData.invoice_postalcode || ''
