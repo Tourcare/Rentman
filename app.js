@@ -26,8 +26,6 @@ const rentmanRouter = require('./webhooks/routes/rentman');
 // Sync API routes
 // Dashboard API - giver overblik over sync status, fejl og historik
 const syncDashboardRouter = require('./sync/dashboard-api');
-// Line items API - manuel sync af Rentman finansdata til HubSpot line items
-const lineItemsRouter = require('./sync/line-items-api');
 
 const app = express();
 
@@ -120,13 +118,6 @@ app.use('/rentman', rentmanRouter);    // POST /rentman - Rentman webhook events
 // GET  /sync/dashboard              - Kombineret data til dashboard
 app.use('/sync', syncDashboardRouter);
 
-// Line items manuel sync:
-// GET  /sync/line-items/status      - Feature status
-// GET  /sync/line-items/preview/:id - Preview uden at synce
-// POST /sync/line-items/sync/:id    - Sync et projekt
-// POST /sync/line-items/test/:id    - Test sync (ignorerer feature flag)
-// POST /sync/line-items/sync-bulk   - Bulk sync flere projekter
-app.use('/sync/line-items', lineItemsRouter);
 
 // Health check endpoint til load balancer/monitoring
 app.get('/health', (req, res) => {

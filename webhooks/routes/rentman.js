@@ -9,10 +9,8 @@
  * - Subproject: Opretter/opdaterer HubSpot orders + dashboard sync
  * - Contact/ContactPerson: Synkroniserer til HubSpot companies/contacts
  * - File: Linker tilbud/kontrakter til HubSpot deals
- * - ProjectEquipment/Group: Opdaterer deal beløb + line items sync
- * - ProjectCost: Opdaterer deal beløb + line items sync
- * - ProjectFunction: Synkroniserer personale til line items
- * - ProjectVehicle: Synkroniserer transport til line items
+ * - ProjectEquipment/Group: Opdaterer deal beløb
+ * - ProjectCost: Opdaterer deal beløb
  *
  * Ignorerede events:
  * - Events fra integration brugeren (config.rentman.integrationUserId)
@@ -31,9 +29,6 @@ const { linkFileToDeal } = require('../services/rentman-quotation-files');
 const { handleEquipmentUpdate } = require('../services/rentman-cost-update');
 const { handleDashboardWebhook } = require('../services/rentman-update-db');
 
-// Line items sync - kun aktiv hvis FEATURE_LINE_ITEMS_WEBHOOK=true
-const { handleEquipmentWebhook, handleCostWebhook } = require('../services/rentman-line-items');
-
 const logger = createChildLogger('rentman-route');
 const router = express.Router();
 
@@ -49,11 +44,9 @@ const ITEM_TYPE_HANDLERS = {
     Contact: handleContactEvent,              // → HubSpot companies
     ContactPerson: handleContactEvent,        // → HubSpot contacts
     File: handleFileEvent,                    // → HubSpot attachments
-    ProjectEquipment: handleEquipmentEvent,   // → Deal amount + line items
+    ProjectEquipment: handleEquipmentEvent,   // → Deal amount
     ProjectEquipmentGroup: handleEquipmentEvent,
-    ProjectCost: handleCostEvent,             // → Deal amount + line items
-    ProjectFunction: handleFunctionEvent,     // → Line items (crew)
-    ProjectVehicle: handleVehicleEvent        // → Line items (transport)
+    ProjectCost: handleCostEvent              // → Deal amount
 };
 
 /**
@@ -247,37 +240,18 @@ async function handleFileEvent(event) {
 
 /**
  * Håndterer ProjectEquipment og ProjectEquipmentGroup events.
- * 1. Opdaterer deal amount i HubSpot (handleEquipmentUpdate)
- * 2. Synkroniserer line items hvis feature er aktiveret (handleEquipmentWebhook)
+ * Opdaterer deal amount i HubSpot.
  */
 async function handleEquipmentEvent(event) {
     await handleEquipmentUpdate(event);
-    await handleEquipmentWebhook(event);  // Kun aktiv hvis FEATURE_LINE_ITEMS_WEBHOOK=true
 }
 
 /**
  * Håndterer ProjectCost events.
- * Samme som equipment - opdaterer beløb og synkroniserer line items.
+ * Opdaterer deal amount i HubSpot.
  */
 async function handleCostEvent(event) {
     await handleEquipmentUpdate(event);
-    await handleCostWebhook(event);  // Kun aktiv hvis FEATURE_LINE_ITEMS_WEBHOOK=true
-}
-
-/**
- * Håndterer ProjectFunction events (personale/crew).
- * Synkroniserer kun til line items - påvirker ikke deal amount direkte.
- */
-async function handleFunctionEvent(event) {
-    await handleEquipmentWebhook(event);  // Kun aktiv hvis FEATURE_LINE_ITEMS_WEBHOOK=true
-}
-
-/**
- * Håndterer ProjectVehicle events (transport).
- * Synkroniserer kun til line items - påvirker ikke deal amount direkte.
- */
-async function handleVehicleEvent(event) {
-    await handleEquipmentWebhook(event);  // Kun aktiv hvis FEATURE_LINE_ITEMS_WEBHOOK=true
 }
 
 module.exports = router;

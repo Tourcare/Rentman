@@ -132,30 +132,7 @@ const config = {
     // ==========================================================================
     // Feature flags - slå funktioner til/fra uden code deploy
     // ==========================================================================
-    features: {
-        /**
-         * Line Items Sync
-         * Synkroniserer Rentman projekt-finanser til HubSpot line items på deals.
-         *
-         * Miljøvariabler:
-         * - FEATURE_LINE_ITEMS=true           Aktivér funktionen
-         * - FEATURE_LINE_ITEMS_WEBHOOK=true   Auto-sync ved webhooks
-         * - FEATURE_LINE_ITEMS_EQUIPMENT=true Inkluder udstyr
-         * - FEATURE_LINE_ITEMS_COSTS=true     Inkluder omkostninger
-         * - FEATURE_LINE_ITEMS_CREW=true      Inkluder personale
-         * - FEATURE_LINE_ITEMS_TRANSPORT=true Inkluder transport
-         * - FEATURE_LINE_ITEMS_DELETE_EXISTING=true  Slet gamle før sync
-         */
-        lineItems: {
-            enabled: process.env.FEATURE_LINE_ITEMS === 'true',
-            syncOnWebhook: process.env.FEATURE_LINE_ITEMS_WEBHOOK === 'true',
-            includeEquipment: process.env.FEATURE_LINE_ITEMS_EQUIPMENT !== 'false',
-            includeCosts: process.env.FEATURE_LINE_ITEMS_COSTS !== 'false',
-            includeCrew: process.env.FEATURE_LINE_ITEMS_CREW !== 'false',
-            includeTransport: process.env.FEATURE_LINE_ITEMS_TRANSPORT !== 'false',
-            deleteExisting: process.env.FEATURE_LINE_ITEMS_DELETE_EXISTING !== 'false'
-        }
-    },
+    features: {},
 
     // ==========================================================================
     // Brugere til web login (JSON array fra miljøvariabel)
