@@ -55,12 +55,12 @@ async function handleDealCreation(event) {
 
     const usagePeriod = deal.properties.usage_period;
     const endPeriod = deal.properties.slut_projekt_period;
-
+    /*
     if (deal.pipeline != "default") {
         logger.info('Ikke en udlejnings deal', { dealname: deal.properties.dealname });
         return true
     }
-
+    */
     if (!usagePeriod || !endPeriod) {
         logger.info('Deal mangler projektperiode', { dealname: deal.properties.dealname });
         return true;
