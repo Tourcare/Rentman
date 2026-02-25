@@ -47,11 +47,11 @@ async function rentmanCrossCheckRental(projectRef) {
                 }
 
                 await db.insertSyncedDeal(
-                    projectInfo.displayname || null,
-                    projectInfo.id || null,
-                    hubspotData?.hubspot_deal_id ?? null,
-                    companyDb?.id ?? null,
-                    contactDb?.id ?? null
+                    projectInfo.displayname || '',
+                    projectInfo.id || 0,
+                    hubspotData?.hubspot_deal_id || 0,
+                    companyDb?.id || 0,
+                    contactDb?.id || 0
                 );
 
                 logger.syncOperation('convert', 'request_to_deal', {

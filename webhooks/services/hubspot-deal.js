@@ -111,9 +111,9 @@ async function handleDealCreation(event) {
     });
 
     await db.insertSyncedRequest(
-        rentmanRequest.id ?? null,
-        event.objectId ?? null,
-        companyDbRecord?.id ?? null
+        rentmanRequest.id || 0,
+        event.objectId || 0,
+        companyDbRecord?.id || 0
     );
 
     logger.syncOperation('create', 'rental_request', {
