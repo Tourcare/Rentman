@@ -274,7 +274,7 @@ async function createSubprojectOrder(subproject, hubspotDealId, companySync, con
             result.id,
             companySync?.id || 0,
             contactSync?.id || 0,
-            dealSync?.id || null
+            dealSync?.id || 0
         );
 
         // Opdater dashboard database
