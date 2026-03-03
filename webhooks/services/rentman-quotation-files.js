@@ -56,7 +56,12 @@ async function linkFileToDeal(event) {
         }
 
         const fileType = isQuote ? 'Tilbud vedr.' : 'Ordrebekraeftelse for';
-        const fileName = `${fileType} ${project.displayname}`;
+        const safeName = project.displayname
+            .replace(/\//g, '-')
+            .replace(/[\\:*?"<>|]/g, '-')
+            .replace(/\.+$/, '')
+            .trim();
+        const fileName = `${fileType} ${safeName}`;
 
         logger.info('Uploader fil til HubSpot', {
             fileName,
