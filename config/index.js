@@ -76,6 +76,7 @@ const config = {
             orderToCompany: 509,
             orderToContact: 507,
             orderToDeal: 512,
+            contactToLead: 578,
             contactToCompany: 1,
             noteToDeal: 214,
             lineItemToDeal: 20  // Tilføjet til line items sync

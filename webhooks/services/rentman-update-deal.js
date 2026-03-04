@@ -115,7 +115,8 @@ async function updateDeal(webhook, isFromRequest = false) {
         );
 
         if (!hubspotDeal) {
-            logger.warn('Ingen HubSpot deal fundet', { rentmanProjectId: project.id });
+            logger.warn('Ingen HubSpot deal fundet i database - opretter projektet i stedet', { rentmanProjectId: project.id });
+            await syncDeal(webhook);
             return;
         }
 
