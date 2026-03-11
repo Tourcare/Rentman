@@ -18,6 +18,8 @@ const session = require('express-session');
 const config = require('./config');
 const logger = require('./lib/logger');
 const db = require('./lib/database');
+const hubspot = require('./lib/hubspot-client');
+const rentman = require('./lib/rentman-client');
 
 // Webhook route handlers
 const hubspotRouter = require('./webhooks/routes/hubspot');
@@ -152,6 +154,8 @@ function gracefulShutdown(signal) {
         logger.info('HTTP server lukket');
 
         try {
+            hubspot.stopRetryProcessor();
+            rentman.stopRetryProcessor();
             await db.shutdown();
             logger.info('Database forbindelser lukket');
             process.exit(0);
@@ -195,6 +199,10 @@ const server = app.listen(config.server.port, () => {
     if (!config.validate()) {
         logger.warn('Konfiguration mangler nogle vaerdier');
     }
+
+    // Start retry-processorer for fejlede API requests (kører hvert 10. minut)
+    hubspot.startRetryProcessor();
+    rentman.startRetryProcessor();
 });
 
 module.exports = app;
