@@ -4,6 +4,7 @@ const db = require('../../lib/database');
 const hubspot = require('../../lib/hubspot-client');
 const rentman = require('../../lib/rentman-client');
 const { sanitizeNumber, retry, extractIdFromRef, sleep } = require('../../lib/utils');
+const { ensureOrder } = require('./rentman-update-order');
 
 const logger = createChildLogger('rentman-deal');
 
@@ -82,6 +83,21 @@ async function syncDeal(webhook) {
             rentmanId: project.id,
             hubspotId: dealId
         }, true);
+
+        // Sync eksisterende subprojects - ensureOrder er idempotent og forhindrer dubletter
+        const subProjects = await rentman.getProjectSubprojects(projectRef);
+        if (subProjects?.length > 0) {
+            for (const sub of subProjects) {
+                try {
+                    await ensureOrder(sub);
+                } catch (err) {
+                    logger.error('Fejl ved sync af subproject i syncDeal', {
+                        subprojectId: sub.id,
+                        error: err.message
+                    });
+                }
+            }
+        }
     } catch (error) {
         logger.error('Fejl i syncDeal', {
             error: error.message,
@@ -260,13 +276,10 @@ async function updateDealAssociations(hubspotDeal, contactInfo, customerInfo, su
     }
 
     for (const sub of subProjects) {
-        const hubSub = await retry(
-            () => db.findSyncedOrderByRentmanId(sub.id),
-            { maxAttempts: 3, delayMs: 8000 }
-        );
+        const hubSub = await ensureOrder(sub);
 
         if (!hubSub?.hubspot_order_id) {
-            logger.warn('Kunne ikke finde order i database', { subprojectName: sub.displayname });
+            logger.warn('Kunne ikke finde eller oprette order', { subprojectName: sub.displayname });
             continue;
         }
 

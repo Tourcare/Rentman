@@ -18,65 +18,8 @@ async function createOrders(webhook) {
                 continue;
             }
 
-            // Sync subproject data til database
             await syncSubprojectToDatabase(subProjectInfo);
-
-            const projectInfo = await rentman.get(subProjectInfo.project);
-            if (!projectInfo) {
-                logger.warn('Kunne ikke hente project for subproject', { projectRef: subProjectInfo.project });
-                continue;
-            }
-
-            const [companyInfo, contactInfo] = await Promise.all([
-                rentman.get(projectInfo.customer),
-                rentman.get(projectInfo.cust_contact)
-            ]);
-
-            let companyDb = null;
-            let contactDb = null;
-
-            if (companyInfo?.id) {
-                companyDb = await db.findSyncedCompanyByRentmanId(companyInfo.id);
-            }
-
-            if (contactInfo?.id) {
-                contactDb = await db.findSyncedContactByRentmanId(contactInfo.id);
-            }
-
-            const dealInfo = await retry(async () => {
-                const existingOrder = await db.findSyncedOrderByRentmanId(subProjectInfo.id);
-                if (existingOrder) {
-                    logger.info('Order allerede oprettet - duplikat', { subprojectId: subProjectInfo.id });
-                    return null;
-                }
-                return db.findSyncedDealByRentmanId(projectInfo.id);
-            }, { maxAttempts: 6, delayMs: 5000 });
-
-            if (!dealInfo) {
-                logger.warn('Ingen deal fundet for project', { projectId: projectInfo.id });
-                continue;
-            }
-
-            const orderId = await createHubSpotOrder(
-                subProjectInfo,
-                dealInfo.hubspot_project_id,
-                companyDb?.hubspot_id,
-                contactDb?.hubspot_id
-            );
-
-            await db.insertSyncedOrder(
-                subProjectInfo.displayname,
-                subProjectInfo.id,
-                orderId,
-                companyDb?.id || 0,
-                contactDb?.id || 0,
-                dealInfo.id
-            );
-
-            logger.syncOperation('create', 'order', {
-                rentmanId: subProjectInfo.id,
-                hubspotId: orderId
-            }, true);
+            await ensureOrder(subProjectInfo);
         } catch (error) {
             logger.error('Fejl ved oprettelse af order', {
                 error: error.message,
@@ -101,13 +44,10 @@ async function updateOrders(webhook) {
             // Sync subproject data til database
             await syncSubprojectToDatabase(subProjectInfo);
 
-            const orderInfo = await retry(
-                () => db.findSyncedOrderByRentmanId(subProjectInfo.id),
-                { maxAttempts: 3, delayMs: 3000 }
-            );
+            const orderInfo = await ensureOrder(subProjectInfo);
 
             if (!orderInfo) {
-                logger.warn('Ingen order fundet', { subprojectName: subProjectInfo.displayname });
+                logger.warn('Kunne ikke finde eller oprette order', { subprojectName: subProjectInfo.displayname });
                 continue;
             }
 
@@ -177,6 +117,75 @@ async function syncSubprojectToDatabase(subProjectInfo) {
             id: subProjectInfo.id
         });
     }
+}
+
+/**
+ * Finder en order i databasen - eller opretter den i HubSpot hvis den ikke findes.
+ * Retrier op til 3 gange i databasen, og opretter som fallback.
+ */
+async function ensureOrder(subProjectInfo) {
+    const existing = await retry(
+        () => db.findSyncedOrderByRentmanId(subProjectInfo.id),
+        { maxAttempts: 3, delayMs: 3000 }
+    );
+
+    if (existing) return existing;
+
+    logger.info('Order ikke fundet i database - opretter ny', { subprojectId: subProjectInfo.id, name: subProjectInfo.displayname });
+
+    const projectInfo = await rentman.get(subProjectInfo.project);
+    if (!projectInfo) {
+        logger.warn('Kunne ikke hente project for subproject', { projectRef: subProjectInfo.project });
+        return null;
+    }
+
+    const dealInfo = await retry(
+        () => db.findSyncedDealByRentmanId(projectInfo.id),
+        { maxAttempts: 6, delayMs: 5000 }
+    );
+
+    if (!dealInfo) {
+        logger.warn('Ingen deal fundet for project - kan ikke oprette order', { projectId: projectInfo.id });
+        return null;
+    }
+
+    const [companyInfo, contactInfo] = await Promise.all([
+        rentman.get(projectInfo.customer),
+        rentman.get(projectInfo.cust_contact)
+    ]);
+
+    let companyDb = null;
+    let contactDb = null;
+
+    if (companyInfo?.id) {
+        companyDb = await db.findSyncedCompanyByRentmanId(companyInfo.id);
+    }
+    if (contactInfo?.id) {
+        contactDb = await db.findSyncedContactByRentmanId(contactInfo.id);
+    }
+
+    const orderId = await createHubSpotOrder(
+        subProjectInfo,
+        dealInfo.hubspot_project_id,
+        companyDb?.hubspot_id,
+        contactDb?.hubspot_id
+    );
+
+    await db.insertSyncedOrder(
+        subProjectInfo.displayname,
+        subProjectInfo.id,
+        orderId,
+        companyDb?.id || 0,
+        contactDb?.id || 0,
+        dealInfo.id
+    );
+
+    logger.syncOperation('create', 'order', {
+        rentmanId: subProjectInfo.id,
+        hubspotId: orderId
+    }, true);
+
+    return db.findSyncedOrderByRentmanId(subProjectInfo.id);
 }
 
 async function createHubSpotOrder(subproject, dealId, companyId, contactId) {
@@ -300,5 +309,6 @@ async function updateDealStatusAndFinancial(hubspotDealId) {
 module.exports = {
     createOrders,
     updateOrders,
-    deleteOrder
+    deleteOrder,
+    ensureOrder
 };

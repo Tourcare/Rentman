@@ -3,6 +3,7 @@ const db = require('../../lib/database');
 const hubspot = require('../../lib/hubspot-client');
 const rentman = require('../../lib/rentman-client');
 const { sanitizeNumber, extractIdFromRef } = require('../../lib/utils');
+const { ensureOrder } = require('./rentman-update-order');
 
 const logger = createChildLogger('rentman-cost');
 
@@ -37,13 +38,8 @@ async function handleEquipmentUpdate(event) {
                 continue;
             }
 
-            const [dealDb, orderDb] = await Promise.all([
-                db.findSyncedDealByRentmanId(projectId),
-                subprojectId ? db.findSyncedOrderByRentmanId(subprojectId) : null
-            ]);
-
+            const dealDb = await db.findSyncedDealByRentmanId(projectId);
             const hubspotDealId = dealDb?.hubspot_project_id;
-            const hubspotOrderId = orderDb?.hubspot_order_id;
 
             if (!hubspotDealId) {
                 continue;
@@ -51,8 +47,14 @@ async function handleEquipmentUpdate(event) {
 
             await updateDealFinancial(projectId, hubspotDealId);
 
-            if (hubspotOrderId && subprojectId) {
-                await updateOrderFinancial(subprojectId, hubspotOrderId);
+            if (subprojectId) {
+                const subprojectInfo = await rentman.get(`/subprojects/${subprojectId}`);
+                if (subprojectInfo) {
+                    const orderDb = await ensureOrder(subprojectInfo);
+                    if (orderDb?.hubspot_order_id) {
+                        await updateOrderFinancial(subprojectId, orderDb.hubspot_order_id);
+                    }
+                }
             }
 
             logger.syncOperation('update', 'financials', {
