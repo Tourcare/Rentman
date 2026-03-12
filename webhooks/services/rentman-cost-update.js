@@ -60,8 +60,7 @@ async function handleEquipmentUpdate(event) {
             logger.syncOperation('update', 'financials', {
                 projectId,
                 subprojectId,
-                hubspotDealId,
-                hubspotOrderId
+                hubspotDealId
             }, true);
         } catch (error) {
             logger.error('Fejl ved opdatering af financials', {
