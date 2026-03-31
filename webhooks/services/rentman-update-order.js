@@ -7,6 +7,9 @@ const { sanitizeNumber, retry, extractIdFromRef } = require('../../lib/utils');
 
 const logger = createChildLogger('rentman-order');
 
+// In-memory lock map to prevent concurrent ensureOrder calls for the same subproject
+const pendingOrders = new Map();
+
 async function createOrders(webhook) {
     logger.info('createOrders funktion kaldet');
 
@@ -121,9 +124,28 @@ async function syncSubprojectToDatabase(subProjectInfo) {
 
 /**
  * Finder en order i databasen - eller opretter den i HubSpot hvis den ikke findes.
- * Retrier op til 3 gange i databasen, og opretter som fallback.
+ * Bruger in-memory lock per subproject ID for at forhindre concurrent duplicate creates.
  */
 async function ensureOrder(subProjectInfo) {
+    const subId = subProjectInfo.id;
+
+    // If another call is already creating this order, wait for it
+    if (pendingOrders.has(subId)) {
+        logger.info('Venter på igangværende order oprettelse', { subprojectId: subId });
+        return pendingOrders.get(subId);
+    }
+
+    const promise = _ensureOrderImpl(subProjectInfo);
+    pendingOrders.set(subId, promise);
+
+    try {
+        return await promise;
+    } finally {
+        pendingOrders.delete(subId);
+    }
+}
+
+async function _ensureOrderImpl(subProjectInfo) {
     const existing = await retry(
         () => db.findSyncedOrderByRentmanId(subProjectInfo.id),
         { maxAttempts: 3, delayMs: 3000 }

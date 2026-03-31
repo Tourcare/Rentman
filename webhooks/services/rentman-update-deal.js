@@ -8,7 +8,29 @@ const { ensureOrder } = require('./rentman-update-order');
 
 const logger = createChildLogger('rentman-deal');
 
+// In-memory lock map to prevent concurrent syncDeal calls for the same project
+const pendingDeals = new Map();
+
 async function syncDeal(webhook) {
+    const projectRef = webhook.items[0].ref;
+
+    // If another call is already creating this deal, wait for it
+    if (pendingDeals.has(projectRef)) {
+        logger.info('Venter på igangværende deal oprettelse', { projectRef });
+        return pendingDeals.get(projectRef);
+    }
+
+    const promise = _syncDealImpl(webhook);
+    pendingDeals.set(projectRef, promise);
+
+    try {
+        return await promise;
+    } finally {
+        pendingDeals.delete(projectRef);
+    }
+}
+
+async function _syncDealImpl(webhook) {
     logger.info('syncDeal funktion kaldet');
 
     try {
@@ -17,6 +39,16 @@ async function syncDeal(webhook) {
 
         if (!project) {
             logger.error('Kunne ikke hente projekt fra Rentman', { ref: projectRef });
+            return;
+        }
+
+        // Tjek om deal allerede eksisterer (f.eks. oprettet af et andet webhook lige inden)
+        const existingDeal = await db.findSyncedDealByRentmanId(project.id);
+        if (existingDeal) {
+            logger.info('Deal eksisterer allerede - springer oprettelse over', {
+                rentmanId: project.id,
+                hubspotId: existingDeal.hubspot_project_id
+            });
             return;
         }
 

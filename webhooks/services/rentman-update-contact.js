@@ -6,6 +6,10 @@ const { sanitizeEmail, formatContactName, retry, getFormatedRentmanAdress } = re
 
 const logger = createChildLogger('rentman-contact');
 
+// In-memory lock maps to prevent concurrent creates for the same entity
+const pendingCompanies = new Map();
+const pendingContactPersons = new Map();
+
 async function createContact(webhook) {
     const item = webhook.items[0];
     const itemType = webhook.itemType;
@@ -79,9 +83,34 @@ async function deleteContact(webhook) {
 }
 
 async function createCompanyFromRentman(item) {
+    const ref = item.ref;
+
+    if (pendingCompanies.has(ref)) {
+        logger.info('Venter på igangværende virksomhed oprettelse', { ref });
+        return pendingCompanies.get(ref);
+    }
+
+    const promise = _createCompanyImpl(item);
+    pendingCompanies.set(ref, promise);
+
+    try {
+        return await promise;
+    } finally {
+        pendingCompanies.delete(ref);
+    }
+}
+
+async function _createCompanyImpl(item) {
     const contactData = await rentman.get(item.ref);
     if (!contactData) {
         logger.warn('Kunne ikke hente contact data fra Rentman', { ref: item.ref });
+        return;
+    }
+
+    // Tjek om virksomhed allerede eksisterer
+    const existing = await db.findSyncedCompanyByRentmanId(contactData.id);
+    if (existing) {
+        logger.info('Virksomhed eksisterer allerede - springer oprettelse over', { rentmanId: contactData.id });
         return;
     }
 
@@ -107,9 +136,34 @@ async function createCompanyFromRentman(item) {
 }
 
 async function createContactPersonFromRentman(item) {
+    const ref = item.ref;
+
+    if (pendingContactPersons.has(ref)) {
+        logger.info('Venter på igangværende kontaktperson oprettelse', { ref });
+        return pendingContactPersons.get(ref);
+    }
+
+    const promise = _createContactPersonImpl(item);
+    pendingContactPersons.set(ref, promise);
+
+    try {
+        return await promise;
+    } finally {
+        pendingContactPersons.delete(ref);
+    }
+}
+
+async function _createContactPersonImpl(item) {
     const personData = await rentman.get(item.ref);
     if (!personData) {
         logger.warn('Kunne ikke hente person data fra Rentman', { ref: item.ref });
+        return;
+    }
+
+    // Tjek om kontaktperson allerede eksisterer
+    const existing = await db.findSyncedContactByRentmanId(personData.id);
+    if (existing) {
+        logger.info('Kontaktperson eksisterer allerede - springer oprettelse over', { rentmanId: personData.id });
         return;
     }
 

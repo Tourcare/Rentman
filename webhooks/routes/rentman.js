@@ -44,9 +44,12 @@ const ITEM_TYPE_HANDLERS = {
     Contact: handleContactEvent,              // → HubSpot companies
     ContactPerson: handleContactEvent,        // → HubSpot contacts
     File: handleFileEvent,                    // → HubSpot attachments
-    ProjectEquipment: handleEquipmentEvent,   // → Deal amount
+    ProjectEquipment: handleEquipmentEvent,   // → Deal amount + DB sync
     ProjectEquipmentGroup: handleEquipmentEvent,
-    ProjectCost: handleCostEvent              // → Deal amount
+    ProjectCost: handleCostEvent,             // → Deal amount + DB sync
+    ProjectFunction: handleFunctionEvent,     // → Deal amount + DB sync
+    ProjectFunctionGroup: handleFunctionEvent,
+    ProjectCrew: handleCrewEvent              // → DB sync
 };
 
 /**
@@ -248,9 +251,27 @@ async function handleEquipmentEvent(event) {
 
 /**
  * Håndterer ProjectCost events.
- * Opdaterer deal amount i HubSpot.
+ * Opdaterer deal amount i HubSpot og synkroniserer til database.
  */
 async function handleCostEvent(event) {
+    await handleEquipmentUpdate(event);
+}
+
+/**
+ * Håndterer ProjectFunction og ProjectFunctionGroup events.
+ * Opdaterer deal amount i HubSpot og synkroniserer til database.
+ */
+async function handleFunctionEvent(event) {
+    await handleEquipmentUpdate(event);
+}
+
+/**
+ * Håndterer ProjectCrew events.
+ * Synkroniserer crew-tildelinger til database.
+ * Bemærk: ProjectCrew har ingen direkte project/subproject ref - kun via function.
+ * Finansielle opdateringer springes derfor over.
+ */
+async function handleCrewEvent(event) {
     await handleEquipmentUpdate(event);
 }
 

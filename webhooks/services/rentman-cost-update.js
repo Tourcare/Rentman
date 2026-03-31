@@ -7,6 +7,16 @@ const { ensureOrder } = require('./rentman-update-order');
 
 const logger = createChildLogger('rentman-cost');
 
+// Mapping fra itemType til Rentman API endpoint
+const ITEM_TYPE_ENDPOINTS = {
+    ProjectEquipment: 'projectequipment',
+    ProjectEquipmentGroup: 'projectequipmentgroup',
+    ProjectFunction: 'projectfunctions',
+    ProjectFunctionGroup: 'projectfunctiongroups',
+    ProjectCost: 'costs',
+    ProjectCrew: 'projectcrew'
+};
+
 async function handleEquipmentUpdate(event) {
     logger.info('handleEquipmentUpdate kaldet', { itemCount: event.items.length, eventType: event.eventType });
 
@@ -18,13 +28,15 @@ async function handleEquipmentUpdate(event) {
 
     for (const item of event.items) {
         try {
-            if (!item.ref) {
+            // Resolve ref: brug item.ref hvis tilgængelig, ellers konstruer fra item.id
+            const ref = item.ref || (item.id ? `/${ITEM_TYPE_ENDPOINTS[event.itemType]}/${item.id}` : null);
+            if (!ref) {
                 continue;
             }
 
-            const rentmanData = await rentman.get(item.ref);
+            const rentmanData = await rentman.get(ref);
             if (!rentmanData) {
-                logger.warn('Kunne ikke hente equipment data', { ref: item.ref });
+                logger.warn('Kunne ikke hente data fra Rentman', { ref, itemType: event.itemType });
                 continue;
             }
 
@@ -79,15 +91,32 @@ async function handleEquipmentUpdate(event) {
 async function handleEquipmentDelete(event) {
     for (const itemId of event.items) {
         try {
-            if (event.itemType === 'ProjectEquipment') {
-                await db.deleteProjectEquipment(itemId);
-                logger.debug('Slettede project_equipment fra database', { id: itemId });
-            } else if (event.itemType === 'ProjectEquipmentGroup') {
-                await db.deleteProjectEquipmentGroup(itemId);
-                logger.debug('Slettede project_equipment_group fra database', { id: itemId });
+            switch (event.itemType) {
+                case 'ProjectEquipment':
+                    await db.deleteProjectEquipment(itemId);
+                    break;
+                case 'ProjectEquipmentGroup':
+                    await db.deleteProjectEquipmentGroup(itemId);
+                    break;
+                case 'ProjectFunction':
+                    await db.deleteProjectFunction(itemId);
+                    break;
+                case 'ProjectFunctionGroup':
+                    await db.deleteProjectFunctionGroup(itemId);
+                    break;
+                case 'ProjectCost':
+                    await db.deleteProjectCost(itemId);
+                    break;
+                case 'ProjectCrew':
+                    await db.deleteProjectCrew(itemId);
+                    break;
+                default:
+                    logger.debug('Ingen delete handler for itemType', { itemType: event.itemType });
+                    return;
             }
+            logger.debug(`Slettede ${event.itemType} fra database`, { id: itemId });
         } catch (error) {
-            logger.error('Fejl ved sletning af equipment fra database', {
+            logger.error('Fejl ved sletning fra database', {
                 error: error.message,
                 itemType: event.itemType,
                 id: itemId
@@ -102,26 +131,58 @@ async function handleEquipmentDelete(event) {
  */
 async function syncEquipmentToDatabase(itemType, rentmanData) {
     try {
-        if (itemType === 'ProjectEquipment') {
-            // Upsert selve equipment
-            await db.upsertProjectEquipment(rentmanData);
-            logger.debug('Synkede project_equipment til database', { id: rentmanData.id });
-
-            // Hent og upsert tilhørende equipment_group hvis den findes
-            if (rentmanData.equipment_group) {
-                const groupData = await rentman.get(rentmanData.equipment_group);
-                if (groupData) {
-                    await db.upsertProjectEquipmentGroup(groupData);
-                    logger.debug('Synkede project_equipment_group til database', { id: groupData.id });
+        switch (itemType) {
+            case 'ProjectEquipment':
+                await db.upsertProjectEquipment(rentmanData);
+                logger.debug('Synkede project_equipment til database', { id: rentmanData.id });
+                // Hent og upsert tilhørende equipment_group hvis den findes
+                if (rentmanData.equipment_group) {
+                    const eqGroupData = await rentman.get(rentmanData.equipment_group);
+                    if (eqGroupData) {
+                        await db.upsertProjectEquipmentGroup(eqGroupData);
+                        logger.debug('Synkede project_equipment_group til database', { id: eqGroupData.id });
+                    }
                 }
-            }
-        } else if (itemType === 'ProjectEquipmentGroup') {
-            // Upsert selve equipment group
-            await db.upsertProjectEquipmentGroup(rentmanData);
-            logger.debug('Synkede project_equipment_group til database', { id: rentmanData.id });
+                break;
+
+            case 'ProjectEquipmentGroup':
+                await db.upsertProjectEquipmentGroup(rentmanData);
+                logger.debug('Synkede project_equipment_group til database', { id: rentmanData.id });
+                break;
+
+            case 'ProjectFunction':
+                await db.upsertProjectFunction(rentmanData);
+                logger.debug('Synkede project_function til database', { id: rentmanData.id });
+                // Hent og upsert tilhørende function_group hvis den findes
+                if (rentmanData.group) {
+                    const fnGroupData = await rentman.get(rentmanData.group);
+                    if (fnGroupData) {
+                        await db.upsertProjectFunctionGroup(fnGroupData);
+                        logger.debug('Synkede project_function_group til database', { id: fnGroupData.id });
+                    }
+                }
+                break;
+
+            case 'ProjectFunctionGroup':
+                await db.upsertProjectFunctionGroup(rentmanData);
+                logger.debug('Synkede project_function_group til database', { id: rentmanData.id });
+                break;
+
+            case 'ProjectCost':
+                await db.upsertProjectCost(rentmanData);
+                logger.debug('Synkede project_cost til database', { id: rentmanData.id });
+                break;
+
+            case 'ProjectCrew':
+                await db.upsertProjectCrew(rentmanData);
+                logger.debug('Synkede project_crew til database', { id: rentmanData.id });
+                break;
+
+            default:
+                logger.debug('Ingen sync handler for itemType', { itemType });
         }
     } catch (error) {
-        logger.error('Fejl ved sync af equipment til database', {
+        logger.error('Fejl ved sync til database', {
             error: error.message,
             itemType,
             id: rentmanData.id
