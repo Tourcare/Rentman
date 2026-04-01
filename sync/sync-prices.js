@@ -7,21 +7,33 @@ const logger = createChildLogger('sync-prices');
 
 // HubSpot product IDs for each price category
 const PRODUCT_MAP = {
-    'Salg med moms':    '412309550328',
-    'Salg uden moms':   '412310271169',
-    'Ydelse med moms':  '412216270038',
-    'Ydelse uden moms': '412219929846',
-    'Insurance':        '394858376380'
+    'Leje':         '412309550328',
+    'Opbevaring':   '412310271169',
+    'Crew':         '412216270038',
+    'Crew u/ moms': '412219929846',
+    'Insurance':    '394858376380'
 };
+
+// HubSpot tax ID for 25% moms
+const TAX_ID_MOMS = '116790442';
+
+// Calculate total ex moms from a price row
+function calcTotal(row) {
+    return sanitizeNumber(row.equipment_no_vat) +
+           sanitizeNumber(row.equipment_vat) +
+           sanitizeNumber(row.functions_no_vat) +
+           sanitizeNumber(row.functions_vat) +
+           sanitizeNumber(row.insurance);
+}
 
 // Maps SQL columns to line item names
 function buildLineItems(row) {
     return [
-        { name: 'Salg med moms',    price: sanitizeNumber(row.equipment_vat) },
-        { name: 'Salg uden moms',   price: sanitizeNumber(row.equipment_no_vat) },
-        { name: 'Ydelse med moms',  price: sanitizeNumber(row.functions_vat) },
-        { name: 'Ydelse uden moms', price: sanitizeNumber(row.functions_no_vat) },
-        { name: 'Insurance',        price: sanitizeNumber(row.insurance) }
+        { name: 'Leje',         price: sanitizeNumber(row.equipment_vat),   taxId: TAX_ID_MOMS },
+        { name: 'Opbevaring',   price: sanitizeNumber(row.equipment_no_vat), taxId: null },
+        { name: 'Crew',         price: sanitizeNumber(row.functions_vat),   taxId: TAX_ID_MOMS },
+        { name: 'Crew u/ moms', price: sanitizeNumber(row.functions_no_vat), taxId: null },
+        { name: 'Insurance',    price: sanitizeNumber(row.insurance),        taxId: null }
     ].filter(item => item.price > 0);
 }
 
@@ -73,19 +85,27 @@ FROM (
             JOIN project_equipment_group g ON CAST(SUBSTRING_INDEX(e.equipment_group, '/', -1) AS UNSIGNED) = g.id
             JOIN subprojects s2 ON CAST(SUBSTRING_INDEX(g.subproject, '/', -1) AS UNSIGNED) = s2.id
             WHERE (e.ledger = '/ledgercodes/14' OR e.ledger = '/ledgercodes/15')
-              AND g.in_price_calculation = 1 AND s2.status != '/statuses/2'
+              AND g.in_price_calculation = 1 AND (e.is_option = 0 OR e.is_option IS NULL) AND s2.status != '/statuses/2'
             UNION ALL
             SELECT
                 CAST(SUBSTRING_INDEX(c.subproject, '/', -1) AS UNSIGNED) AS subproject_id,
-                ((c.unit_price * c.quantity) * IFNULL(c.factor, 1)) * (1 - IFNULL(c.discount, 0)) AS line_total,
+                (COALESCE(c.sale_price, c.unit_price) * c.quantity) * (1 - IFNULL(c.discount, 0)) AS line_total,
                 CASE
+                    WHEN c.ledger = '/ledgercodes/1'  THEN (1 - IFNULL(s2.discount_rental, 0))
+                    WHEN c.ledger = '/ledgercodes/2'  THEN (1 - IFNULL(s2.discount_sale, 0))
+                    WHEN c.ledger = '/ledgercodes/3'  THEN (1 - IFNULL(s2.discount_crew, 0))
+                    WHEN c.ledger = '/ledgercodes/4'  THEN (1 - IFNULL(s2.discount_transport, 0))
                     WHEN c.ledger = '/ledgercodes/14' THEN (1 - IFNULL(s2.discount_crew, 0))
                     WHEN c.ledger = '/ledgercodes/15' THEN (1 - IFNULL(s2.discount_rental, 0))
+                    ELSE                                   (1 - IFNULL(s2.discount_additional_costs, 0))
                 END AS discount_factor,
                 (1 - IFNULL(s2.discount_subproject, 0)) AS subproject_factor
             FROM project_costs c
             JOIN subprojects s2 ON CAST(SUBSTRING_INDEX(c.subproject, '/', -1) AS UNSIGNED) = s2.id
-            WHERE (c.ledger = '/ledgercodes/14' OR c.ledger = '/ledgercodes/15')
+            WHERE (c.ledger IN ('/ledgercodes/14', '/ledgercodes/15')
+                   OR c.taxclass = '/taxclasses/4')
+              AND c.ledger NOT IN ('/ledgercodes/16', '/ledgercodes/17', '/ledgercodes/18',
+                                   '/ledgercodes/19', '/ledgercodes/20', '/ledgercodes/21')
               AND s2.status != '/statuses/2'
         ) AS combined_no_vat
         GROUP BY subproject_id
@@ -113,11 +133,11 @@ FROM (
                 '/ledgercodes/16', '/ledgercodes/17', '/ledgercodes/18',
                 '/ledgercodes/19', '/ledgercodes/20', '/ledgercodes/21'
             )
-              AND g.in_price_calculation = 1 AND s2.status != '/statuses/2'
+              AND g.in_price_calculation = 1 AND (e.is_option = 0 OR e.is_option IS NULL) AND s2.status != '/statuses/2'
             UNION ALL
             SELECT
                 CAST(SUBSTRING_INDEX(c.subproject, '/', -1) AS UNSIGNED) AS subproject_id,
-                ((c.unit_price * c.quantity) * IFNULL(c.factor, 1)) * (1 - IFNULL(c.discount, 0)) AS line_total,
+                (COALESCE(c.sale_price, c.unit_price) * c.quantity) * (1 - IFNULL(c.discount, 0)) AS line_total,
                 CASE
                     WHEN c.ledger = '/ledgercodes/1'  THEN (1 - IFNULL(s2.discount_rental, 0))
                     WHEN c.ledger = '/ledgercodes/2'  THEN (1 - IFNULL(s2.discount_sale, 0))
@@ -133,6 +153,7 @@ FROM (
                 '/ledgercodes/16', '/ledgercodes/17', '/ledgercodes/18',
                 '/ledgercodes/19', '/ledgercodes/20', '/ledgercodes/21'
             )
+              AND IFNULL(c.taxclass, '') != '/taxclasses/4'
               AND s2.status != '/statuses/2'
         ) AS combined_vat
         GROUP BY subproject_id
@@ -144,14 +165,22 @@ FROM (
             SUM(
                 COALESCE(f.price_total, f.unit_price * f.quantity * (1 - IFNULL(f.discount, 0))) *
                 CASE
+                    WHEN f.ledger = '/ledgercodes/1'  THEN (1 - IFNULL(s2.discount_rental, 0))
+                    WHEN f.ledger = '/ledgercodes/2'  THEN (1 - IFNULL(s2.discount_sale, 0))
+                    WHEN f.ledger = '/ledgercodes/3'  THEN (1 - IFNULL(s2.discount_crew, 0))
+                    WHEN f.ledger = '/ledgercodes/4'  THEN (1 - IFNULL(s2.discount_transport, 0))
                     WHEN f.ledger = '/ledgercodes/14' THEN (1 - IFNULL(s2.discount_crew, 0))
                     WHEN f.ledger = '/ledgercodes/15' THEN (1 - IFNULL(s2.discount_rental, 0))
+                    ELSE                                   (1 - IFNULL(s2.discount_additional_costs, 0))
                 END *
                 (1 - IFNULL(s2.discount_subproject, 0))
             ) AS total
         FROM project_functions f
         JOIN subprojects s2 ON CAST(SUBSTRING_INDEX(f.subproject, '/', -1) AS UNSIGNED) = s2.id
-        WHERE (f.ledger = '/ledgercodes/14' OR f.ledger = '/ledgercodes/15')
+        WHERE (f.ledger IN ('/ledgercodes/14', '/ledgercodes/15')
+               OR f.taxclass = '/taxclasses/4')
+          AND f.ledger NOT IN ('/ledgercodes/16', '/ledgercodes/17', '/ledgercodes/18',
+                               '/ledgercodes/19', '/ledgercodes/20', '/ledgercodes/21')
           AND IFNULL(f.in_financial, 1) = 1 AND s2.status != '/statuses/2'
         GROUP BY subproject_id
     ) AS fn_no_vat ON fn_no_vat.subproject_id = s.id
@@ -171,93 +200,38 @@ FROM (
                 (1 - IFNULL(s2.discount_subproject, 0))
             ) AS total
         FROM project_functions f
-        JOIN subprojects s2 ON CAST(SUBSTRING_INDEX(f.subproject, '/', -1) AS UNSIGNED) = s2.id
+        Join subprojects s2 ON CAST(SUBSTRING_INDEX(f.subproject, '/', -1) AS UNSIGNED) = s2.id
         WHERE f.ledger NOT IN (
             '/ledgercodes/14', '/ledgercodes/15',
             '/ledgercodes/16', '/ledgercodes/17', '/ledgercodes/18',
             '/ledgercodes/19', '/ledgercodes/20', '/ledgercodes/21'
         )
+          AND IFNULL(f.taxclass, '') != '/taxclasses/4'
           AND IFNULL(f.in_financial, 1) = 1 AND s2.status != '/statuses/2'
         GROUP BY subproject_id
     ) AS fn_vat ON fn_vat.subproject_id = s.id
 
     LEFT JOIN (
-        SELECT subproject_id, SUM(line_total * discount_factor) * MAX(insurance_rate) AS total
-        FROM (
-            SELECT
-                CAST(SUBSTRING_INDEX(g.subproject, '/', -1) AS UNSIGNED) AS subproject_id,
-                ((e.unit_price * e.quantity_total) * e.factor) * (1 - IFNULL(e.discount, 0)) AS line_total,
-                CASE
-                    WHEN e.ledger = '/ledgercodes/1'  THEN (1 - IFNULL(s2.discount_rental, 0))
-                    WHEN e.ledger = '/ledgercodes/2'  THEN (1 - IFNULL(s2.discount_sale, 0))
-                    WHEN e.ledger = '/ledgercodes/3'  THEN (1 - IFNULL(s2.discount_crew, 0))
-                    WHEN e.ledger = '/ledgercodes/4'  THEN (1 - IFNULL(s2.discount_transport, 0))
-                    WHEN e.ledger = '/ledgercodes/14' THEN (1 - IFNULL(s2.discount_crew, 0))
-                    WHEN e.ledger = '/ledgercodes/15' THEN (1 - IFNULL(s2.discount_rental, 0))
-                    ELSE                                   (1 - IFNULL(s2.discount_additional_costs, 0))
-                END AS discount_factor,
-                s2.insurance_rate
-            FROM project_equipment e
-            JOIN project_equipment_group g ON CAST(SUBSTRING_INDEX(e.equipment_group, '/', -1) AS UNSIGNED) = g.id
-            JOIN subprojects s2 ON CAST(SUBSTRING_INDEX(g.subproject, '/', -1) AS UNSIGNED) = s2.id
-            WHERE e.ledger NOT IN (
-                '/ledgercodes/16', '/ledgercodes/17', '/ledgercodes/18',
-                '/ledgercodes/19', '/ledgercodes/20', '/ledgercodes/21'
-            )
-              AND g.in_price_calculation = 1 AND s2.status != '/statuses/2'
-            UNION ALL
-            SELECT
-                CAST(SUBSTRING_INDEX(c.subproject, '/', -1) AS UNSIGNED) AS subproject_id,
-                ((c.unit_price * c.quantity) * IFNULL(c.factor, 1)) * (1 - IFNULL(c.discount, 0)) AS line_total,
-                CASE
-                    WHEN c.ledger = '/ledgercodes/1'  THEN (1 - IFNULL(s2.discount_rental, 0))
-                    WHEN c.ledger = '/ledgercodes/2'  THEN (1 - IFNULL(s2.discount_sale, 0))
-                    WHEN c.ledger = '/ledgercodes/3'  THEN (1 - IFNULL(s2.discount_crew, 0))
-                    WHEN c.ledger = '/ledgercodes/4'  THEN (1 - IFNULL(s2.discount_transport, 0))
-                    WHEN c.ledger = '/ledgercodes/14' THEN (1 - IFNULL(s2.discount_crew, 0))
-                    WHEN c.ledger = '/ledgercodes/15' THEN (1 - IFNULL(s2.discount_rental, 0))
-                    ELSE                                   (1 - IFNULL(s2.discount_additional_costs, 0))
-                END AS discount_factor,
-                s2.insurance_rate
-            FROM project_costs c
-            JOIN subprojects s2 ON CAST(SUBSTRING_INDEX(c.subproject, '/', -1) AS UNSIGNED) = s2.id
-            WHERE c.ledger NOT IN (
-                '/ledgercodes/16', '/ledgercodes/17', '/ledgercodes/18',
-                '/ledgercodes/19', '/ledgercodes/20', '/ledgercodes/21'
-            )
-              AND s2.status != '/statuses/2'
-            UNION ALL
-            SELECT
-                CAST(SUBSTRING_INDEX(f.subproject, '/', -1) AS UNSIGNED) AS subproject_id,
-                COALESCE(f.price_total, f.unit_price * f.quantity * (1 - IFNULL(f.discount, 0))) AS line_total,
-                CASE
-                    WHEN f.ledger = '/ledgercodes/1'  THEN (1 - IFNULL(s2.discount_rental, 0))
-                    WHEN f.ledger = '/ledgercodes/2'  THEN (1 - IFNULL(s2.discount_sale, 0))
-                    WHEN f.ledger = '/ledgercodes/3'  THEN (1 - IFNULL(s2.discount_crew, 0))
-                    WHEN f.ledger = '/ledgercodes/4'  THEN (1 - IFNULL(s2.discount_transport, 0))
-                    WHEN f.ledger = '/ledgercodes/14' THEN (1 - IFNULL(s2.discount_crew, 0))
-                    WHEN f.ledger = '/ledgercodes/15' THEN (1 - IFNULL(s2.discount_rental, 0))
-                    ELSE                                   (1 - IFNULL(s2.discount_additional_costs, 0))
-                END AS discount_factor,
-                s2.insurance_rate
-            FROM project_functions f
-            JOIN subprojects s2 ON CAST(SUBSTRING_INDEX(f.subproject, '/', -1) AS UNSIGNED) = s2.id
-            WHERE f.ledger NOT IN (
-                '/ledgercodes/16', '/ledgercodes/17', '/ledgercodes/18',
-                '/ledgercodes/19', '/ledgercodes/20', '/ledgercodes/21'
-            )
-              AND IFNULL(f.in_financial, 1) = 1 AND s2.status != '/statuses/2'
-        ) AS ins_base
+        SELECT
+            CAST(SUBSTRING_INDEX(g.subproject, '/', -1) AS UNSIGNED) AS subproject_id,
+            SUM(
+                ((e.unit_price * e.quantity_total) * e.factor) * (1 - IFNULL(e.discount, 0))
+            ) * MAX(s2.insurance_rate) AS total
+        FROM project_equipment e
+        JOIN project_equipment_group g ON CAST(SUBSTRING_INDEX(e.equipment_group, '/', -1) AS UNSIGNED) = g.id
+        JOIN subprojects s2 ON CAST(SUBSTRING_INDEX(g.subproject, '/', -1) AS UNSIGNED) = s2.id
+        WHERE e.ledger IN ('/ledgercodes/1', '/ledgercodes/15')
+          AND g.in_price_calculation = 1 AND (e.is_option = 0 OR e.is_option IS NULL) AND s2.status != '/statuses/2'
         GROUP BY subproject_id
     ) AS ins ON ins.subproject_id = s.id
 
     WHERE s.status != '/statuses/2'
+  AND IFNULL(s.in_financial, 1) = 1
 
 ) AS sp
 
 GROUP BY project_id, project_name, project_number
 ORDER BY project_id DESC
-LIMIT 10
 `;
 
 // ============================================================================
@@ -296,19 +270,27 @@ LEFT JOIN (
         JOIN project_equipment_group g ON CAST(SUBSTRING_INDEX(e.equipment_group, '/', -1) AS UNSIGNED) = g.id
         JOIN subprojects s2 ON CAST(SUBSTRING_INDEX(g.subproject, '/', -1) AS UNSIGNED) = s2.id
         WHERE (e.ledger = '/ledgercodes/14' OR e.ledger = '/ledgercodes/15')
-          AND g.in_price_calculation = 1 AND s2.status != '/statuses/2'
+          AND g.in_price_calculation = 1 AND (e.is_option = 0 OR e.is_option IS NULL) AND s2.status != '/statuses/2'
         UNION ALL
         SELECT
             CAST(SUBSTRING_INDEX(c.subproject, '/', -1) AS UNSIGNED) AS subproject_id,
-            ((c.unit_price * c.quantity) * IFNULL(c.factor, 1)) * (1 - IFNULL(c.discount, 0)) AS line_total,
+            (COALESCE(c.sale_price, c.unit_price) * c.quantity) * (1 - IFNULL(c.discount, 0)) AS line_total,
             CASE
+                WHEN c.ledger = '/ledgercodes/1'  THEN (1 - IFNULL(s2.discount_rental, 0))
+                WHEN c.ledger = '/ledgercodes/2'  THEN (1 - IFNULL(s2.discount_sale, 0))
+                WHEN c.ledger = '/ledgercodes/3'  THEN (1 - IFNULL(s2.discount_crew, 0))
+                WHEN c.ledger = '/ledgercodes/4'  THEN (1 - IFNULL(s2.discount_transport, 0))
                 WHEN c.ledger = '/ledgercodes/14' THEN (1 - IFNULL(s2.discount_crew, 0))
                 WHEN c.ledger = '/ledgercodes/15' THEN (1 - IFNULL(s2.discount_rental, 0))
+                ELSE                                   (1 - IFNULL(s2.discount_additional_costs, 0))
             END AS discount_factor,
             (1 - IFNULL(s2.discount_subproject, 0)) AS subproject_factor
         FROM project_costs c
         JOIN subprojects s2 ON CAST(SUBSTRING_INDEX(c.subproject, '/', -1) AS UNSIGNED) = s2.id
-        WHERE (c.ledger = '/ledgercodes/14' OR c.ledger = '/ledgercodes/15')
+        WHERE (c.ledger IN ('/ledgercodes/14', '/ledgercodes/15')
+               OR c.taxclass = '/taxclasses/4')
+          AND c.ledger NOT IN ('/ledgercodes/16', '/ledgercodes/17', '/ledgercodes/18',
+                               '/ledgercodes/19', '/ledgercodes/20', '/ledgercodes/21')
           AND s2.status != '/statuses/2'
     ) AS combined_no_vat
     GROUP BY subproject_id
@@ -336,16 +318,16 @@ LEFT JOIN (
             '/ledgercodes/16', '/ledgercodes/17', '/ledgercodes/18',
             '/ledgercodes/19', '/ledgercodes/20', '/ledgercodes/21'
         )
-          AND g.in_price_calculation = 1 AND s2.status != '/statuses/2'
+          AND g.in_price_calculation = 1 AND (e.is_option = 0 OR e.is_option IS NULL) AND s2.status != '/statuses/2'
         UNION ALL
         SELECT
             CAST(SUBSTRING_INDEX(c.subproject, '/', -1) AS UNSIGNED) AS subproject_id,
-            ((c.unit_price * c.quantity) * IFNULL(c.factor, 1)) * (1 - IFNULL(c.discount, 0)) AS line_total,
+            (COALESCE(c.sale_price, c.unit_price) * c.quantity) * (1 - IFNULL(c.discount, 0)) AS line_total,
             CASE
                 WHEN c.ledger = '/ledgercodes/1'  THEN (1 - IFNULL(s2.discount_rental, 0))
                 WHEN c.ledger = '/ledgercodes/2'  THEN (1 - IFNULL(s2.discount_sale, 0))
                 WHEN c.ledger = '/ledgercodes/3'  THEN (1 - IFNULL(s2.discount_crew, 0))
-                WHEN c.ledger = '/ledgercodes/4'  THEN (1 - IFNULL(s2.discount_transport, 0))
+                WHEN c.ledger = '/ledgercodes/4'  THEN (1 - IFNULL(s2.discount_transport,0))
                 ELSE                                   (1 - IFNULL(s2.discount_additional_costs, 0))
             END AS discount_factor,
             (1 - IFNULL(s2.discount_subproject, 0)) AS subproject_factor
@@ -356,6 +338,7 @@ LEFT JOIN (
             '/ledgercodes/16', '/ledgercodes/17', '/ledgercodes/18',
             '/ledgercodes/19', '/ledgercodes/20', '/ledgercodes/21'
         )
+          AND IFNULL(c.taxclass, '') != '/taxclasses/4'
           AND s2.status != '/statuses/2'
     ) AS combined_vat
     GROUP BY subproject_id
@@ -367,14 +350,22 @@ LEFT JOIN (
         SUM(
             COALESCE(f.price_total, f.unit_price * f.quantity * (1 - IFNULL(f.discount, 0))) *
             CASE
+                WHEN f.ledger = '/ledgercodes/1'  THEN (1 - IFNULL(s2.discount_rental, 0))
+                WHEN f.ledger = '/ledgercodes/2'  THEN (1 - IFNULL(s2.discount_sale, 0))
+                WHEN f.ledger = '/ledgercodes/3'  THEN (1 - IFNULL(s2.discount_crew, 0))
+                WHEN f.ledger = '/ledgercodes/4'  THEN (1 - IFNULL(s2.discount_transport, 0))
                 WHEN f.ledger = '/ledgercodes/14' THEN (1 - IFNULL(s2.discount_crew, 0))
                 WHEN f.ledger = '/ledgercodes/15' THEN (1 - IFNULL(s2.discount_rental, 0))
+                ELSE                                   (1 - IFNULL(s2.discount_additional_costs, 0))
             END *
             (1 - IFNULL(s2.discount_subproject, 0))
         ) AS total
     FROM project_functions f
     JOIN subprojects s2 ON CAST(SUBSTRING_INDEX(f.subproject, '/', -1) AS UNSIGNED) = s2.id
-    WHERE (f.ledger = '/ledgercodes/14' OR f.ledger = '/ledgercodes/15')
+    WHERE (f.ledger IN ('/ledgercodes/14', '/ledgercodes/15')
+           OR f.taxclass = '/taxclasses/4')
+      AND f.ledger NOT IN ('/ledgercodes/16', '/ledgercodes/17', '/ledgercodes/18',
+                           '/ledgercodes/19', '/ledgercodes/20', '/ledgercodes/21')
       AND IFNULL(f.in_financial, 1) = 1 AND s2.status != '/statuses/2'
     GROUP BY subproject_id
 ) AS fn_no_vat ON fn_no_vat.subproject_id = s.id
@@ -400,82 +391,27 @@ LEFT JOIN (
         '/ledgercodes/16', '/ledgercodes/17', '/ledgercodes/18',
         '/ledgercodes/19', '/ledgercodes/20', '/ledgercodes/21'
     )
+      AND IFNULL(f.taxclass, '') != '/taxclasses/4'
       AND IFNULL(f.in_financial, 1) = 1 AND s2.status != '/statuses/2'
     GROUP BY subproject_id
 ) AS fn_vat ON fn_vat.subproject_id = s.id
 
 LEFT JOIN (
-    SELECT subproject_id, SUM(line_total * discount_factor) * MAX(insurance_rate) AS total
-    FROM (
-        SELECT
-            CAST(SUBSTRING_INDEX(g.subproject, '/', -1) AS UNSIGNED) AS subproject_id,
-            ((e.unit_price * e.quantity_total) * e.factor) * (1 - IFNULL(e.discount, 0)) AS line_total,
-            CASE
-                WHEN e.ledger = '/ledgercodes/1'  THEN (1 - IFNULL(s2.discount_rental, 0))
-                WHEN e.ledger = '/ledgercodes/2'  THEN (1 - IFNULL(s2.discount_sale, 0))
-                WHEN e.ledger = '/ledgercodes/3'  THEN (1 - IFNULL(s2.discount_crew, 0))
-                WHEN e.ledger = '/ledgercodes/4'  THEN (1 - IFNULL(s2.discount_transport, 0))
-                WHEN e.ledger = '/ledgercodes/14' THEN (1 - IFNULL(s2.discount_crew, 0))
-                WHEN e.ledger = '/ledgercodes/15' THEN (1 - IFNULL(s2.discount_rental, 0))
-                ELSE                                   (1 - IFNULL(s2.discount_additional_costs, 0))
-            END AS discount_factor,
-            s2.insurance_rate
-        FROM project_equipment e
-        JOIN project_equipment_group g ON CAST(SUBSTRING_INDEX(e.equipment_group, '/', -1) AS UNSIGNED) = g.id
-        JOIN subprojects s2 ON CAST(SUBSTRING_INDEX(g.subproject, '/', -1) AS UNSIGNED) = s2.id
-        WHERE e.ledger NOT IN (
-            '/ledgercodes/16', '/ledgercodes/17', '/ledgercodes/18',
-            '/ledgercodes/19', '/ledgercodes/20', '/ledgercodes/21'
-        )
-          AND g.in_price_calculation = 1 AND s2.status != '/statuses/2'
-        UNION ALL
-        SELECT
-            CAST(SUBSTRING_INDEX(c.subproject, '/', -1) AS UNSIGNED) AS subproject_id,
-            ((c.unit_price * c.quantity) * IFNULL(c.factor, 1)) * (1 - IFNULL(c.discount, 0)) AS line_total,
-            CASE
-                WHEN c.ledger = '/ledgercodes/1'  THEN (1 - IFNULL(s2.discount_rental, 0))
-                WHEN c.ledger = '/ledgercodes/2'  THEN (1 - IFNULL(s2.discount_sale, 0))
-                WHEN c.ledger = '/ledgercodes/3'  THEN (1 - IFNULL(s2.discount_crew, 0))
-                WHEN c.ledger = '/ledgercodes/4'  THEN (1 - IFNULL(s2.discount_transport, 0))
-                WHEN c.ledger = '/ledgercodes/14' THEN (1 - IFNULL(s2.discount_crew, 0))
-                WHEN c.ledger = '/ledgercodes/15' THEN (1 - IFNULL(s2.discount_rental, 0))
-                ELSE                                   (1 - IFNULL(s2.discount_additional_costs, 0))
-            END AS discount_factor,
-            s2.insurance_rate
-        FROM project_costs c
-        JOIN subprojects s2 ON CAST(SUBSTRING_INDEX(c.subproject, '/', -1) AS UNSIGNED) = s2.id
-        WHERE c.ledger NOT IN (
-            '/ledgercodes/16', '/ledgercodes/17', '/ledgercodes/18',
-            '/ledgercodes/19', '/ledgercodes/20', '/ledgercodes/21'
-        )
-          AND s2.status != '/statuses/2'
-        UNION ALL
-        SELECT
-            CAST(SUBSTRING_INDEX(f.subproject, '/', -1) AS UNSIGNED) AS subproject_id,
-            COALESCE(f.price_total, f.unit_price * f.quantity * (1 - IFNULL(f.discount, 0))) AS line_total,
-            CASE
-                WHEN f.ledger = '/ledgercodes/1'  THEN (1 - IFNULL(s2.discount_rental, 0))
-                WHEN f.ledger = '/ledgercodes/2'  THEN (1 - IFNULL(s2.discount_sale, 0))
-                WHEN f.ledger = '/ledgercodes/3'  THEN (1 - IFNULL(s2.discount_crew, 0))
-                WHEN f.ledger = '/ledgercodes/4'  THEN (1 - IFNULL(s2.discount_transport, 0))
-                WHEN f.ledger = '/ledgercodes/14' THEN (1 - IFNULL(s2.discount_crew, 0))
-                WHEN f.ledger = '/ledgercodes/15' THEN (1 - IFNULL(s2.discount_rental, 0))
-                ELSE                                   (1 - IFNULL(s2.discount_additional_costs, 0))
-            END AS discount_factor,
-            s2.insurance_rate
-        FROM project_functions f
-        JOIN subprojects s2 ON CAST(SUBSTRING_INDEX(f.subproject, '/', -1) AS UNSIGNED) = s2.id
-        WHERE f.ledger NOT IN (
-            '/ledgercodes/16', '/ledgercodes/17', '/ledgercodes/18',
-            '/ledgercodes/19', '/ledgercodes/20', '/ledgercodes/21'
-        )
-          AND IFNULL(f.in_financial, 1) = 1 AND s2.status != '/statuses/2'
-    ) AS ins_base
+    SELECT
+        CAST(SUBSTRING_INDEX(g.subproject, '/', -1) AS UNSIGNED) AS subproject_id,
+        SUM(
+            ((e.unit_price * e.quantity_total) * e.factor) * (1 - IFNULL(e.discount, 0))
+        ) * MAX(s2.insurance_rate) AS total
+    FROM project_equipment e
+    JOIN project_equipment_group g ON CAST(SUBSTRING_INDEX(e.equipment_group, '/', -1) AS UNSIGNED) = g.id
+    JOIN subprojects s2 ON CAST(SUBSTRING_INDEX(g.subproject, '/', -1) AS UNSIGNED) = s2.id
+    WHERE e.ledger IN ('/ledgercodes/1', '/ledgercodes/15')
+      AND g.in_price_calculation = 1 AND (e.is_option = 0 OR e.is_option IS NULL) AND s2.status != '/statuses/2'
     GROUP BY subproject_id
 ) AS ins ON ins.subproject_id = s.id
 
 WHERE s.status != '/statuses/2'
-  AND p.id IN (?)
+  AND IFNULL(s.in_financial, 1) = 1
 
 ORDER BY p.id, s.id
 `;
@@ -486,9 +422,9 @@ ORDER BY p.id, s.id
 
 async function syncPrices() {
     console.log('=== Sync Prices: Start ===');
-    console.log('Henter priser for de 50 seneste projekter...\n');
+    console.log('Henter priser for alle projekter...\n');
 
-    // 1. Get project-level prices (50 most recent)
+    // 1. Get project-level prices
     const projectPrices = await db.query(PROJECT_PRICES_SQL);
     console.log(`Fundet ${projectPrices.length} projekter med prisdata\n`);
 
@@ -497,19 +433,15 @@ async function syncPrices() {
         process.exit(0);
     }
 
-    const projectIds = projectPrices.map(r => r.project_id);
-
-    // 2. Get subproject-level prices for those projects
-    const subprojectPrices = await db.query(SUBPROJECT_PRICES_SQL, [projectIds]);
+    // 2. Get subproject-level prices
+    const subprojectPrices = await db.query(SUBPROJECT_PRICES_SQL);
     console.log(`Fundet ${subprojectPrices.length} subprojekter med prisdata\n`);
 
     // 3. Get synced deals and orders to find HubSpot IDs
-    const syncedDeals = await db.query('SELECT * FROM synced_deals WHERE rentman_project_id IN (?)', [projectIds]);
+    const syncedDeals = await db.query('SELECT * FROM synced_deals');
     const syncedOrders = await db.query(
         `SELECT o.* FROM synced_order o
-         INNER JOIN synced_deals d ON o.synced_deals_id = d.id
-         WHERE d.rentman_project_id IN (?)`,
-        [projectIds]
+         INNER JOIN synced_deals d ON o.synced_deals_id = d.id`
     );
 
     // Build lookup maps
@@ -540,6 +472,15 @@ async function syncPrices() {
         }
 
         const hubspotDealId = deal.hubspot_project_id;
+
+        const dealExists = await hubspot.getDeal(hubspotDealId, ['dealname']);
+        if (!dealExists) {
+            dealsSkipped++;
+            console.log(`  SKIP deal ${hubspotDealId} (${project.project_name}) - deal findes ikke i HubSpot`);
+            await sleep(100);
+            continue;
+        }
+
         const items = buildLineItems(project);
 
         if (items.length === 0) {
@@ -566,7 +507,8 @@ async function syncPrices() {
                     name: item.name,
                     quantity: '1',
                     price: String(item.price),
-                    hs_product_id: PRODUCT_MAP[item.name]
+                    hs_product_id: PRODUCT_MAP[item.name],
+                    ...(item.taxId ? { hs_tax_rate_group_id: item.taxId } : {})
                 };
 
                 try {
@@ -580,6 +522,15 @@ async function syncPrices() {
             }
 
             await sleep(150);
+        }
+
+        // Update deal total price
+        const dealTotal = calcTotal(project);
+        try {
+            await hubspot.updateDeal(hubspotDealId, { amount: String(dealTotal) });
+            console.log(`    = Total: ${dealTotal} kr`);
+        } catch (error) {
+            console.error(`    FEJL opdatering deal total: ${error.message}`);
         }
     }
 
@@ -595,6 +546,15 @@ async function syncPrices() {
         }
 
         const hubspotOrderId = order.hubspot_order_id;
+
+        const orderExists = await hubspot.getOrder(hubspotOrderId, ['hs_order_name']);
+        if (!orderExists) {
+            ordersSkipped++;
+            console.log(`  SKIP order ${hubspotOrderId} (${sp.subproject_name}) - order findes ikke i HubSpot`);
+            await sleep(100);
+            continue;
+        }
+
         const items = buildLineItems(sp);
 
         if (items.length === 0) {
@@ -621,7 +581,8 @@ async function syncPrices() {
                     name: item.name,
                     quantity: '1',
                     price: String(item.price),
-                    hs_product_id: PRODUCT_MAP[item.name]
+                    hs_product_id: PRODUCT_MAP[item.name],
+                    ...(item.taxId ? { hs_tax_rate_group_id: item.taxId } : {})
                 };
 
                 try {
@@ -635,6 +596,15 @@ async function syncPrices() {
             }
 
             await sleep(150);
+        }
+
+        // Update order total price
+        const orderTotal = calcTotal(sp);
+        try {
+            await hubspot.updateOrder(hubspotOrderId, { hs_total_price: String(orderTotal) });
+            console.log(`    = Total: ${orderTotal} kr`);
+        } catch (error) {
+            console.error(`    FEJL opdatering order total: ${error.message}`);
         }
     }
 
