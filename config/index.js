@@ -47,6 +47,16 @@ const config = {
             waitForConnections: true,
             connectionLimit: 5,
             queueLimit: 0
+        },
+        // Rentman database til komplet spejling af Rentman data
+        rentman: {
+            host: process.env.DB_HOST,
+            user: process.env.DB_USER,
+            password: process.env.DB_PASSWORD,
+            database: process.env.RENTMAN_DB_NAME || 'rentman_data',
+            waitForConnections: true,
+            connectionLimit: 10,
+            queueLimit: 0
         }
     },
 

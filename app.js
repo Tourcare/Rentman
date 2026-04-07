@@ -18,6 +18,7 @@ const session = require('express-session');
 const config = require('./config');
 const logger = require('./lib/logger');
 const db = require('./lib/database');
+const rentmanDb = require('./lib/rentman-db');
 const hubspot = require('./lib/hubspot-client');
 const rentman = require('./lib/rentman-client');
 
@@ -28,6 +29,7 @@ const rentmanRouter = require('./webhooks/routes/rentman');
 // Sync API routes
 // Dashboard API - giver overblik over sync status, fejl og historik
 const syncDashboardRouter = require('./sync/dashboard-api');
+const { syncAll, syncItemType, syncItemById } = require('./sync/sync-rentman-db');
 
 const app = express();
 
@@ -121,6 +123,34 @@ app.use('/rentman', rentmanRouter);    // POST /rentman - Rentman webhook events
 app.use('/sync', syncDashboardRouter);
 
 
+// =============================================================================
+// Rentman DB Sync API - synkroniserer Rentman data til dedikeret database
+// =============================================================================
+
+// POST /rentman-db/sync - Start fuld sync af alle item types
+app.post('/rentman-db/sync', (req, res) => {
+    res.json({ status: 'started', message: 'Fuld Rentman DB sync startet' });
+    syncAll().catch(err => logger.error('Fuld Rentman DB sync fejlede', { error: err.message }));
+});
+
+// POST /rentman-db/sync/:itemType - Sync en specifik item type
+app.post('/rentman-db/sync/:itemType', (req, res) => {
+    const { itemType } = req.params;
+    res.json({ status: 'started', message: `Sync af ${itemType} startet` });
+    syncItemType(itemType).catch(err => logger.error(`Sync af ${itemType} fejlede`, { error: err.message }));
+});
+
+// POST /rentman-db/sync/:itemType/:id - Sync et specifikt item by ID
+app.post('/rentman-db/sync/:itemType/:id', async (req, res) => {
+    const { itemType, id } = req.params;
+    try {
+        const success = await syncItemById(itemType, parseInt(id, 10));
+        res.json({ status: success ? 'ok' : 'not_found', itemType, id });
+    } catch (err) {
+        res.status(500).json({ status: 'error', error: err.message });
+    }
+});
+
 // Health check endpoint til load balancer/monitoring
 app.get('/health', (req, res) => {
     res.json({
@@ -157,6 +187,7 @@ function gracefulShutdown(signal) {
             hubspot.stopRetryProcessor();
             rentman.stopRetryProcessor();
             await db.shutdown();
+            await rentmanDb.shutdown();
             logger.info('Database forbindelser lukket');
             process.exit(0);
         } catch (err) {

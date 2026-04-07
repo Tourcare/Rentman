@@ -28,6 +28,7 @@ const { createContact, updateContact, deleteContact } = require('../services/ren
 const { linkFileToDeal } = require('../services/rentman-quotation-files');
 const { handleEquipmentUpdate } = require('../services/rentman-cost-update');
 const { handleDashboardWebhook } = require('../services/rentman-update-db');
+const { saveWebhookToDb } = require('../services/rentman-save-all');
 
 const logger = createChildLogger('rentman-route');
 const router = express.Router();
@@ -104,12 +105,22 @@ router.post('/', async (req, res) => {
             return;
         }
 
+        // Gem ALLE webhook events til Rentman database (uafhængigt af HubSpot handlers)
+        saveWebhookToDb(event).catch(err => {
+            logger.error('Fejl ved gemning til Rentman DB', {
+                error: err.message,
+                itemType: event.itemType,
+                eventType: event.eventType
+            });
+        });
+
+        // Eksisterende HubSpot handlers kører som før
         const handler = ITEM_TYPE_HANDLERS[event.itemType];
 
         if (handler) {
             await handler(event);
         } else {
-            logger.debug('Ingen handler for itemType', { itemType: event.itemType });
+            logger.debug('Ingen HubSpot handler for itemType', { itemType: event.itemType });
         }
 
         const duration = Date.now() - start;
