@@ -277,6 +277,13 @@ async function updateHubSpotDealProperties(hubspotDealId, project) {
 }
 
 async function updateDealAssociations(hubspotDeal, contactInfo, customerInfo, subProjects) {
+    if (!hubspotDeal.hubspot_project_id) {
+        logger.warn('Deal har ingen hubspot_project_id - kan ikke opdatere associations', {
+            rentmanId: hubspotDeal.rentman_project_id
+        });
+        return;
+    }
+
     const oldCompanyDb = hubspotDeal.synced_companies_id
         ? await db.query('SELECT * FROM synced_companies WHERE id = ?', [hubspotDeal.synced_companies_id]).then(rows => rows[0])
         : null;

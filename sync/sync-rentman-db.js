@@ -170,7 +170,7 @@ async function syncItemType(itemType) {
  * 2. For hvert projekt: henter child collection
  * 3. For hvert child item: henter by ID og upsert
  */
-async function syncProjectChildTypes() {
+async function syncProjectChildTypes({ fromProject } = {}) {
     logger.info('Starter sync af project-child types...');
 
     // Hent alle projekt IDs
@@ -182,8 +182,18 @@ async function syncProjectChildTypes() {
         stats[type] = { synced: 0, errors: 0 };
     }
 
+    // Find start-index hvis --from-project er angivet
+    let startIndex = 0;
+    if (fromProject) {
+        const idx = projects.findIndex(p => p.id >= fromProject);
+        if (idx >= 0) {
+            startIndex = idx;
+            logger.info(`Springer de første ${startIndex} projekter over, starter fra id=${projects[startIndex].id}`);
+        }
+    }
+
     const totalProjects = projects.length;
-    for (let pi = 0; pi < totalProjects; pi++) {
+    for (let pi = startIndex; pi < totalProjects; pi++) {
         const project = projects[pi];
         logger.info(`[Project-children] Projekt ${pi + 1}/${totalProjects} (id=${project.id})`);
 
@@ -254,7 +264,7 @@ async function syncItemById(itemType, itemId) {
  * Kører en fuld sync af alle item types til Rentman DB.
  * Synker top-level types først, derefter project-child types.
  */
-async function syncAll() {
+async function syncAll({ from, fromProject } = {}) {
     logger.info('Starter fuld Rentman DB sync...');
     const start = Date.now();
 
@@ -263,22 +273,41 @@ async function syncAll() {
     const totalTypes = allTypes.length;
     let completedTypes = 0;
 
+    // Bestem om top-level types skal springes over
+    const skipTopLevel = from && from.toLowerCase() === 'children';
+    let startFromType = (!skipTopLevel && from) ? from : null;
+    let skipping = !!startFromType;
+
     // Sync top-level types
-    for (const itemType of TOP_LEVEL_TYPES) {
-        completedTypes++;
-        logger.info(`=== [OVERALL ${completedTypes}/${totalTypes}] Starter ${itemType} ===`);
-        try {
-            results[itemType] = await syncItemType(itemType);
-        } catch (error) {
-            logger.error(`Fejl ved sync af ${itemType}`, { error: error.message });
-            results[itemType] = { synced: 0, errors: 1 };
+    if (!skipTopLevel) {
+        for (const itemType of TOP_LEVEL_TYPES) {
+            if (skipping) {
+                if (itemType === startFromType) {
+                    skipping = false;
+                } else {
+                    completedTypes++;
+                    logger.info(`=== [SKIP] ${itemType} (springer over) ===`);
+                    continue;
+                }
+            }
+            completedTypes++;
+            logger.info(`=== [OVERALL ${completedTypes}/${totalTypes}] Starter ${itemType} ===`);
+            try {
+                results[itemType] = await syncItemType(itemType);
+            } catch (error) {
+                logger.error(`Fejl ved sync af ${itemType}`, { error: error.message });
+                results[itemType] = { synced: 0, errors: 1 };
+            }
         }
+    } else {
+        completedTypes = TOP_LEVEL_TYPES.length;
+        logger.info(`=== Springer ${completedTypes} top-level types over ===`);
     }
 
     // Sync project-child types
     logger.info(`=== [OVERALL ${completedTypes}/${totalTypes}] Starter project-child types (${Object.keys(PROJECT_CHILD_TYPES).length} typer) ===`);
     try {
-        const childResults = await syncProjectChildTypes();
+        const childResults = await syncProjectChildTypes({ fromProject });
         Object.assign(results, childResults);
     } catch (error) {
         logger.error('Fejl ved sync af project-child types', { error: error.message });
