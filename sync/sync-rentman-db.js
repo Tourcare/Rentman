@@ -21,6 +21,7 @@ const rentmanDb = require('../lib/rentman-db');
 const logger = createChildLogger('sync-rentman-db');
 
 const RATE_LIMIT_DELAY = 100; // ms mellem API kald
+const BATCH_SIZE = 8; // Parallelle API kald per batch (under 10 req/s limit)
 
 /**
  * Item types med top-level collection endpoints.
@@ -105,6 +106,17 @@ async function fetchAndUpsertById(itemType, itemId) {
     return true;
 }
 
+/**
+ * Henter en batch af items parallelt fra API.
+ * Returnerer kun items med data (filtrerer tomme/fejl fra).
+ */
+async function fetchBatch(endpoint, ids) {
+    const results = await Promise.all(
+        ids.map(id => rentman.get(`${endpoint}/${id}`).catch(() => null))
+    );
+    return results.filter(data => data !== null && data !== undefined);
+}
+
 // =============================================================================
 // Sync funktioner
 // =============================================================================
@@ -133,26 +145,27 @@ async function syncItemType(itemType) {
     let errors = 0;
     const total = collection.length;
 
-    for (let i = 0; i < total; i++) {
-        const item = collection[i];
+    for (let i = 0; i < total; i += BATCH_SIZE) {
+        const batchIds = collection.slice(i, i + BATCH_SIZE).map(item => item.id);
+
         try {
-            const data = await rentman.get(`${config.endpoint}/${item.id}`);
-            if (data) {
-                await rentmanDb.upsertItem(itemType, data);
-                synced++;
-            } else {
-                errors++;
-                logger.warn(`Kunne ikke hente ${itemType} by ID`, { id: item.id });
+            const items = await fetchBatch(config.endpoint, batchIds);
+            errors += batchIds.length - items.length;
+
+            if (items.length > 0) {
+                await rentmanDb.upsertBatch(itemType, items);
+                synced += items.length;
             }
         } catch (error) {
-            errors++;
-            logger.error(`Fejl ved sync af ${itemType}`, { id: item.id, error: error.message });
+            errors += batchIds.length;
+            logger.error(`Fejl ved batch sync af ${itemType}`, { ids: batchIds, error: error.message });
         }
 
-        // Progress logging for hver 25. item eller ved sidste item
-        if ((i + 1) % 25 === 0 || i + 1 === total) {
-            const pct = Math.round(((i + 1) / total) * 100);
-            logger.info(`[${itemType}] ${i + 1}/${total} (${pct}%) - ${synced} OK, ${errors} fejl`);
+        // Progress logging
+        const done = Math.min(i + BATCH_SIZE, total);
+        if (done % 50 < BATCH_SIZE || done === total) {
+            const pct = Math.round((done / total) * 100);
+            logger.info(`[${itemType}] ${done}/${total} (${pct}%) - ${synced} OK, ${errors} fejl`);
         }
 
         await delay(RATE_LIMIT_DELAY);
@@ -211,16 +224,20 @@ async function syncProjectChildTypes({ fromProject } = {}) {
                 const items = Array.isArray(result.data) ? result.data : [];
                 if (items.length === 0) continue;
 
-                for (const item of items) {
+                // Batch fetch + batch upsert
+                for (let bi = 0; bi < items.length; bi += BATCH_SIZE) {
+                    const batchIds = items.slice(bi, bi + BATCH_SIZE).map(item => item.id);
                     try {
-                        const data = await rentman.get(`${config.endpoint}/${item.id}`);
-                        if (data) {
-                            await rentmanDb.upsertItem(itemType, data);
-                            stats[itemType].synced++;
+                        const fetched = await fetchBatch(config.endpoint, batchIds);
+                        stats[itemType].errors += batchIds.length - fetched.length;
+
+                        if (fetched.length > 0) {
+                            await rentmanDb.upsertBatch(itemType, fetched);
+                            stats[itemType].synced += fetched.length;
                         }
                     } catch (error) {
-                        stats[itemType].errors++;
-                        logger.error(`Fejl ved sync af ${itemType}`, { id: item.id, projectId: project.id, error: error.message });
+                        stats[itemType].errors += batchIds.length;
+                        logger.error(`Fejl ved batch sync af ${itemType}`, { projectId: project.id, error: error.message });
                     }
                     await delay(RATE_LIMIT_DELAY);
                 }
