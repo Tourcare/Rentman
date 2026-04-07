@@ -46,7 +46,7 @@ const PROJECT_CHILD_TYPES = {
     ProjectEquipmentGroup: 'projectequipmentgroup',
     ProjectFunction: 'projectfunctions',
     ProjectFunctionGroup: 'projectfunctiongroups',
-    ProjectCost: 'projectcosts',
+    ProjectCost: 'costs',
     ProjectCrew: 'projectcrew',
     ProjectVehicle: 'projectvehicles'
 };
