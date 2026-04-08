@@ -5,6 +5,7 @@ const { syncContacts, syncSingleContact } = require('./sync-contacts');
 const { syncDeals, syncSingleDeal, syncDealFinancials } = require('./sync-deals');
 const { syncOrders, syncSingleOrder, syncOrderFinancials } = require('./sync-orders');
 const db = require('../lib/database');
+const syncLimit = require('../lib/sync-daily-limit');
 
 const logger = createChildLogger('sync-coordinator');
 
@@ -29,6 +30,7 @@ async function runFullSync(options = {}) {
 
     isSyncRunning = true;
     currentSyncType = 'full';
+    await syncLimit.enterSyncMode();
 
     const results = {
         companies: null,
@@ -107,6 +109,7 @@ async function runFullSync(options = {}) {
         await syncLogger.fail(error.message);
         throw error;
     } finally {
+        await syncLimit.exitSyncMode();
         isSyncRunning = false;
         currentSyncType = null;
     }
@@ -142,6 +145,7 @@ async function runSingleTypeSync(syncType, options = {}) {
 
     isSyncRunning = true;
     currentSyncType = syncType;
+    await syncLimit.enterSyncMode();
 
     try {
         let result;
@@ -165,6 +169,7 @@ async function runSingleTypeSync(syncType, options = {}) {
         logger.info('Single type sync completed', { syncType, stats: result });
         return result;
     } finally {
+        await syncLimit.exitSyncMode();
         isSyncRunning = false;
         currentSyncType = null;
     }

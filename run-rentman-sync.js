@@ -14,6 +14,7 @@ require('dotenv').config();
 
 const { syncAll, syncItemType, syncItemById } = require('./sync/sync-rentman-db');
 const rentmanDb = require('./lib/rentman-db');
+const syncLimit = require('./lib/sync-daily-limit');
 
 function parseArgs(argv) {
     const args = argv.slice(2);
@@ -35,6 +36,7 @@ function parseArgs(argv) {
 async function main() {
     const opts = parseArgs(process.argv);
 
+    await syncLimit.enterSyncMode();
     try {
         if (opts.from) {
             console.log(`Fortsætter fuld sync fra ${opts.from}${opts.fromProject ? ` (projekt ${opts.fromProject})` : ''}...`);
@@ -57,6 +59,7 @@ async function main() {
         console.error('Sync fejlede:', err.message);
         process.exitCode = 1;
     } finally {
+        await syncLimit.exitSyncMode();
         await rentmanDb.shutdown();
         process.exit();
     }

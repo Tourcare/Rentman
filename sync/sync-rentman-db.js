@@ -20,7 +20,47 @@ const rentmanDb = require('../lib/rentman-db');
 
 const logger = createChildLogger('sync-rentman-db');
 
-const RATE_LIMIT_DELAY = 100; // ms mellem API kald
+const RATE_LIMIT_DELAY = 100; // ms mellem API kald (bruges af top-level sync)
+
+/**
+ * Rate limiter der respekterer Rentmans API grænser.
+ * Rentman: 10 req/s, 20 concurrent. Vi bruger 8 concurrent / 9 req/s for sikkerhedsmargin.
+ */
+class RateLimiter {
+    constructor(maxConcurrent = 8, maxPerSecond = 9) {
+        this.maxConcurrent = maxConcurrent;
+        this.maxPerSecond = maxPerSecond;
+        this.active = 0;
+        this.queue = [];
+        this.timestamps = [];
+    }
+
+    run(fn) {
+        return new Promise((resolve, reject) => {
+            this.queue.push({ fn, resolve, reject });
+            this._drain();
+        });
+    }
+
+    _drain() {
+        while (this.queue.length > 0 && this.active < this.maxConcurrent) {
+            const now = Date.now();
+            this.timestamps = this.timestamps.filter(t => now - t < 1000);
+            if (this.timestamps.length >= this.maxPerSecond) {
+                const waitMs = 1000 - (now - this.timestamps[0]) + 15;
+                setTimeout(() => this._drain(), waitMs);
+                return;
+            }
+            const { fn, resolve, reject } = this.queue.shift();
+            this.active++;
+            this.timestamps.push(now);
+            fn().then(resolve, reject).finally(() => {
+                this.active--;
+                this._drain();
+            });
+        }
+    }
+}
 
 /**
  * Item types med top-level collection endpoints.
@@ -64,7 +104,7 @@ async function delay(ms) {
  * Henter KUN id feltet for at undgå 6MB response limit.
  * Fuld data hentes efterfølgende by ID for hvert item.
  */
-async function fetchCollection(endpoint, limit = 300) {
+async function fetchCollection(endpoint, limit = 1500) {
     const allItems = [];
     let offset = 0;
     let hasMore = true;
@@ -165,24 +205,22 @@ async function syncItemType(itemType) {
 }
 
 /**
- * Synker project-child item types via alle projekter.
- * 1. Henter alle projekt IDs
- * 2. For hvert projekt: henter child collection
- * 3. For hvert child item: henter by ID og upsert
+ * Synker project-child item types via alle projekter CONCURRENT.
+ * Henter fuld collection data i ét kald pr. child type pr. projekt (ikke N+1).
+ * Bruger RateLimiter til at holde sig under Rentmans 10 req/s og 20 concurrent grænser.
  */
 async function syncProjectChildTypes({ fromProject } = {}) {
-    logger.info('Starter sync af project-child types...');
+    logger.info('Starter concurrent sync af project-child types...');
+    const limiter = new RateLimiter(8, 9);
 
-    // Hent alle projekt IDs
     const projects = await fetchCollection('/projects');
-    logger.info(`Fundet ${projects.length} projekter, synker child types...`);
+    logger.info(`Fundet ${projects.length} projekter, synker child types concurrent...`);
 
     const stats = {};
     for (const type of Object.keys(PROJECT_CHILD_TYPES)) {
         stats[type] = { synced: 0, errors: 0 };
     }
 
-    // Find start-index hvis --from-project er angivet
     let startIndex = 0;
     if (fromProject) {
         const idx = projects.findIndex(p => p.id >= fromProject);
@@ -192,45 +230,42 @@ async function syncProjectChildTypes({ fromProject } = {}) {
         }
     }
 
-    const totalProjects = projects.length;
-    for (let pi = startIndex; pi < totalProjects; pi++) {
-        const project = projects[pi];
-        logger.info(`[Project-children] Projekt ${pi + 1}/${totalProjects} (id=${project.id})`);
+    const projectsToSync = projects.slice(startIndex);
+    const totalProjects = projectsToSync.length;
+    let completedProjects = 0;
 
-        for (const [itemType, subEndpoint] of Object.entries(PROJECT_CHILD_TYPES)) {
-            try {
-                const config = rentmanDb.getItemTypeConfig(itemType);
-                if (!config) continue;
+    const projectPromises = projectsToSync.map(project => {
+        const childPromises = Object.entries(PROJECT_CHILD_TYPES).map(([itemType, subEndpoint]) =>
+            limiter.run(async () => {
+                const cfg = rentmanDb.getItemTypeConfig(itemType);
+                if (!cfg) return;
 
-                // Hent child collection under projektet (kun IDs)
-                const result = await rentman.request('GET', `/projects/${project.id}/${subEndpoint}?fields=id`);
-                await delay(RATE_LIMIT_DELAY);
+                const result = await rentman.request('GET',
+                    `/projects/${project.id}/${subEndpoint}?limit=1500`);
 
-                if (!result.success || !result.data) continue;
+                if (!result.success || !result.data) return;
 
                 const items = Array.isArray(result.data) ? result.data : [];
-                if (items.length === 0) continue;
+                if (items.length === 0) return;
 
-                for (const item of items) {
-                    try {
-                        const data = await rentman.get(`${config.endpoint}/${item.id}`);
-                        if (data) {
-                            await rentmanDb.upsertItem(itemType, data);
-                            stats[itemType].synced++;
-                        }
-                    } catch (error) {
-                        stats[itemType].errors++;
-                        logger.error(`Fejl ved sync af ${itemType}`, { id: item.id, projectId: project.id, error: error.message });
-                    }
-                    await delay(RATE_LIMIT_DELAY);
-                }
+                await rentmanDb.upsertBatch(itemType, items);
+                stats[itemType].synced += items.length;
+            }).catch(error => {
+                stats[itemType].errors++;
+                logger.error(`Fejl ved sync af ${itemType}`, { projectId: project.id, error: error.message });
+            })
+        );
 
-                logger.debug(`[Project-children] Projekt ${project.id}: ${items.length} ${itemType} synket`);
-            } catch (error) {
-                logger.error(`Fejl ved hentning af ${itemType} for projekt`, { projectId: project.id, error: error.message });
+        return Promise.all(childPromises).then(() => {
+            completedProjects++;
+            if (completedProjects % 50 === 0 || completedProjects === totalProjects) {
+                const pct = Math.round((completedProjects / totalProjects) * 100);
+                logger.info(`[Children] ${completedProjects}/${totalProjects} projekter (${pct}%)`);
             }
-        }
-    }
+        });
+    });
+
+    await Promise.all(projectPromises);
 
     for (const [type, s] of Object.entries(stats)) {
         logger.info(`Sync af ${type} færdig`, s);
