@@ -211,7 +211,7 @@ async function syncItemType(itemType) {
  */
 async function syncProjectChildTypes({ fromProject } = {}) {
     logger.info('Starter concurrent sync af project-child types...');
-    const limiter = new RateLimiter(8, 9);
+    const limiter = new RateLimiter(6, 7);
 
     const projects = await fetchCollection('/projects');
     logger.info(`Fundet ${projects.length} projekter, synker child types concurrent...`);
