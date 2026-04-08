@@ -151,6 +151,16 @@ app.post('/rentman-db/sync/:itemType/:id', async (req, res) => {
     }
 });
 
+// Sync status - antal rows pr. rentman_data tabel
+app.get('/sync-count', async (req, res) => {
+    const rentmanDb = require('./lib/rentman-db');
+    const type = req.query.type || 'ProjectEquipment';
+    const config = rentmanDb.getItemTypeConfig(type);
+    if (!config) return res.status(400).json({ error: `Ukendt type: ${type}` });
+    const rows = await rentmanDb.query(`SELECT COUNT(*) AS count FROM ${config.table}`);
+    res.json({ type, table: config.table, count: rows[0].count });
+});
+
 // Health check endpoint til load balancer/monitoring
 app.get('/health', (req, res) => {
     res.json({
