@@ -1,4 +1,5 @@
 const db = require('../lib/database');
+const rentmanDb = require('../lib/rentman-db');
 const hubspot = require('../lib/hubspot-client');
 const { createChildLogger } = require('../lib/logger');
 const { sanitizeNumber, sleep } = require('../lib/utils');
@@ -82,14 +83,14 @@ FROM (
                 END AS discount_factor,
                 (1 - IFNULL(s2.discount_subproject, 0)) AS subproject_factor
             FROM project_equipment e
-            JOIN project_equipment_group g ON CAST(SUBSTRING_INDEX(e.equipment_group, '/', -1) AS UNSIGNED) = g.id
+            JOIN project_equipment_groups g ON CAST(SUBSTRING_INDEX(e.equipment_group, '/', -1) AS UNSIGNED) = g.id
             JOIN subprojects s2 ON CAST(SUBSTRING_INDEX(g.subproject, '/', -1) AS UNSIGNED) = s2.id
             WHERE (e.ledger = '/ledgercodes/14' OR e.ledger = '/ledgercodes/15')
               AND g.in_price_calculation = 1 AND (e.is_option = 0 OR e.is_option IS NULL) AND s2.status != '/statuses/2'
             UNION ALL
             SELECT
                 CAST(SUBSTRING_INDEX(c.subproject, '/', -1) AS UNSIGNED) AS subproject_id,
-                (COALESCE(c.sale_price, c.unit_price) * c.quantity) * (1 - IFNULL(c.discount, 0)) AS line_total,
+                (COALESCE(c.sale_price, c.purchase_price, 0) * c.quantity) * (1 - IFNULL(c.discount, 0)) AS line_total,
                 CASE
                     WHEN c.ledger = '/ledgercodes/1'  THEN (1 - IFNULL(s2.discount_rental, 0))
                     WHEN c.ledger = '/ledgercodes/2'  THEN (1 - IFNULL(s2.discount_sale, 0))
@@ -126,7 +127,7 @@ FROM (
                 END AS discount_factor,
                 (1 - IFNULL(s2.discount_subproject, 0)) AS subproject_factor
             FROM project_equipment e
-            JOIN project_equipment_group g ON CAST(SUBSTRING_INDEX(e.equipment_group, '/', -1) AS UNSIGNED) = g.id
+            JOIN project_equipment_groups g ON CAST(SUBSTRING_INDEX(e.equipment_group, '/', -1) AS UNSIGNED) = g.id
             JOIN subprojects s2 ON CAST(SUBSTRING_INDEX(g.subproject, '/', -1) AS UNSIGNED) = s2.id
             WHERE e.ledger NOT IN (
                 '/ledgercodes/14', '/ledgercodes/15',
@@ -137,7 +138,7 @@ FROM (
             UNION ALL
             SELECT
                 CAST(SUBSTRING_INDEX(c.subproject, '/', -1) AS UNSIGNED) AS subproject_id,
-                (COALESCE(c.sale_price, c.unit_price) * c.quantity) * (1 - IFNULL(c.discount, 0)) AS line_total,
+                (COALESCE(c.sale_price, c.purchase_price, 0) * c.quantity) * (1 - IFNULL(c.discount, 0)) AS line_total,
                 CASE
                     WHEN c.ledger = '/ledgercodes/1'  THEN (1 - IFNULL(s2.discount_rental, 0))
                     WHEN c.ledger = '/ledgercodes/2'  THEN (1 - IFNULL(s2.discount_sale, 0))
@@ -163,7 +164,7 @@ FROM (
         SELECT
             CAST(SUBSTRING_INDEX(f.subproject, '/', -1) AS UNSIGNED) AS subproject_id,
             SUM(
-                COALESCE(f.price_total, f.unit_price * f.quantity * (1 - IFNULL(f.discount, 0))) *
+                COALESCE(f.price_total, 0) *
                 CASE
                     WHEN f.ledger = '/ledgercodes/1'  THEN (1 - IFNULL(s2.discount_rental, 0))
                     WHEN f.ledger = '/ledgercodes/2'  THEN (1 - IFNULL(s2.discount_sale, 0))
@@ -189,7 +190,7 @@ FROM (
         SELECT
             CAST(SUBSTRING_INDEX(f.subproject, '/', -1) AS UNSIGNED) AS subproject_id,
             SUM(
-                COALESCE(f.price_total, f.unit_price * f.quantity * (1 - IFNULL(f.discount, 0))) *
+                COALESCE(f.price_total, 0) *
                 CASE
                     WHEN f.ledger = '/ledgercodes/1'  THEN (1 - IFNULL(s2.discount_rental, 0))
                     WHEN f.ledger = '/ledgercodes/2'  THEN (1 - IFNULL(s2.discount_sale, 0))
@@ -218,7 +219,7 @@ FROM (
                 ((e.unit_price * e.quantity_total) * e.factor) * (1 - IFNULL(e.discount, 0))
             ) * MAX(s2.insurance_rate) AS total
         FROM project_equipment e
-        JOIN project_equipment_group g ON CAST(SUBSTRING_INDEX(e.equipment_group, '/', -1) AS UNSIGNED) = g.id
+        JOIN project_equipment_groups g ON CAST(SUBSTRING_INDEX(e.equipment_group, '/', -1) AS UNSIGNED) = g.id
         JOIN subprojects s2 ON CAST(SUBSTRING_INDEX(g.subproject, '/', -1) AS UNSIGNED) = s2.id
         WHERE e.ledger IN ('/ledgercodes/1', '/ledgercodes/15')
           AND g.in_price_calculation = 1 AND (e.is_option = 0 OR e.is_option IS NULL) AND s2.status != '/statuses/2'
@@ -267,7 +268,7 @@ LEFT JOIN (
             END AS discount_factor,
             (1 - IFNULL(s2.discount_subproject, 0)) AS subproject_factor
         FROM project_equipment e
-        JOIN project_equipment_group g ON CAST(SUBSTRING_INDEX(e.equipment_group, '/', -1) AS UNSIGNED) = g.id
+        JOIN project_equipment_groups g ON CAST(SUBSTRING_INDEX(e.equipment_group, '/', -1) AS UNSIGNED) = g.id
         JOIN subprojects s2 ON CAST(SUBSTRING_INDEX(g.subproject, '/', -1) AS UNSIGNED) = s2.id
         WHERE (e.ledger = '/ledgercodes/14' OR e.ledger = '/ledgercodes/15')
           AND g.in_price_calculation = 1 AND (e.is_option = 0 OR e.is_option IS NULL) AND s2.status != '/statuses/2'
@@ -311,7 +312,7 @@ LEFT JOIN (
             END AS discount_factor,
             (1 - IFNULL(s2.discount_subproject, 0)) AS subproject_factor
         FROM project_equipment e
-        JOIN project_equipment_group g ON CAST(SUBSTRING_INDEX(e.equipment_group, '/', -1) AS UNSIGNED) = g.id
+        JOIN project_equipment_groups g ON CAST(SUBSTRING_INDEX(e.equipment_group, '/', -1) AS UNSIGNED) = g.id
         JOIN subprojects s2 ON CAST(SUBSTRING_INDEX(g.subproject, '/', -1) AS UNSIGNED) = s2.id
         WHERE e.ledger NOT IN (
             '/ledgercodes/14', '/ledgercodes/15',
@@ -348,7 +349,7 @@ LEFT JOIN (
     SELECT
         CAST(SUBSTRING_INDEX(f.subproject, '/', -1) AS UNSIGNED) AS subproject_id,
         SUM(
-            COALESCE(f.price_total, f.unit_price * f.quantity * (1 - IFNULL(f.discount, 0))) *
+            COALESCE(f.price_total, 0) *
             CASE
                 WHEN f.ledger = '/ledgercodes/1'  THEN (1 - IFNULL(s2.discount_rental, 0))
                 WHEN f.ledger = '/ledgercodes/2'  THEN (1 - IFNULL(s2.discount_sale, 0))
@@ -374,7 +375,7 @@ LEFT JOIN (
     SELECT
         CAST(SUBSTRING_INDEX(f.subproject, '/', -1) AS UNSIGNED) AS subproject_id,
         SUM(
-            COALESCE(f.price_total, f.unit_price * f.quantity * (1 - IFNULL(f.discount, 0))) *
+            COALESCE(f.price_total, 0) *
             CASE
                 WHEN f.ledger = '/ledgercodes/1'  THEN (1 - IFNULL(s2.discount_rental, 0))
                 WHEN f.ledger = '/ledgercodes/2'  THEN (1 - IFNULL(s2.discount_sale, 0))
@@ -403,7 +404,7 @@ LEFT JOIN (
             ((e.unit_price * e.quantity_total) * e.factor) * (1 - IFNULL(e.discount, 0))
         ) * MAX(s2.insurance_rate) AS total
     FROM project_equipment e
-    JOIN project_equipment_group g ON CAST(SUBSTRING_INDEX(e.equipment_group, '/', -1) AS UNSIGNED) = g.id
+    JOIN project_equipment_groups g ON CAST(SUBSTRING_INDEX(e.equipment_group, '/', -1) AS UNSIGNED) = g.id
     JOIN subprojects s2 ON CAST(SUBSTRING_INDEX(g.subproject, '/', -1) AS UNSIGNED) = s2.id
     WHERE e.ledger IN ('/ledgercodes/1', '/ledgercodes/15')
       AND g.in_price_calculation = 1 AND (e.is_option = 0 OR e.is_option IS NULL) AND s2.status != '/statuses/2'
@@ -424,8 +425,8 @@ async function syncPrices() {
     console.log('=== Sync Prices: Start ===');
     console.log('Henter priser for alle projekter...\n');
 
-    // 1. Get project-level prices
-    const projectPrices = await db.query(PROJECT_PRICES_SQL);
+    // 1. Get project-level prices (fra rentman_data)
+    const projectPrices = await rentmanDb.query(PROJECT_PRICES_SQL);
     console.log(`Fundet ${projectPrices.length} projekter med prisdata\n`);
 
     if (projectPrices.length === 0) {
@@ -433,8 +434,8 @@ async function syncPrices() {
         process.exit(0);
     }
 
-    // 2. Get subproject-level prices
-    const subprojectPrices = await db.query(SUBPROJECT_PRICES_SQL);
+    // 2. Get subproject-level prices (fra rentman_data)
+    const subprojectPrices = await rentmanDb.query(SUBPROJECT_PRICES_SQL);
     console.log(`Fundet ${subprojectPrices.length} subprojekter med prisdata\n`);
 
     // 3. Get synced deals and orders to find HubSpot IDs

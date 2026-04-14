@@ -17,18 +17,22 @@ const ITEM_TYPE_ENDPOINTS = {
     ProjectCrew: 'projectcrew'
 };
 
+/**
+ * Opdaterer HubSpot deal/order financials når equipment/cost/function/crew
+ * ændres i Rentman. Data-persistering til rentman_data håndteres af
+ * saveWebhookToDb (webhooks/services/rentman-save-all.js).
+ */
 async function handleEquipmentUpdate(event) {
     logger.info('handleEquipmentUpdate kaldet', { itemCount: event.items.length, eventType: event.eventType });
 
-    // Håndter delete events separat
+    // Delete events: vi har intet ref at slå op — lad rentman-save-all håndtere DB sletning
+    // og spring financial refresh over (vi kan ikke slå projekt op fra et slettet item).
     if (event.eventType === 'delete') {
-        await handleEquipmentDelete(event);
         return;
     }
 
     for (const item of event.items) {
         try {
-            // Resolve ref: brug item.ref hvis tilgængelig, ellers konstruer fra item.id
             const ref = item.ref || (item.id ? `/${ITEM_TYPE_ENDPOINTS[event.itemType]}/${item.id}` : null);
             if (!ref) {
                 continue;
@@ -39,9 +43,6 @@ async function handleEquipmentUpdate(event) {
                 logger.warn('Kunne ikke hente data fra Rentman', { ref, itemType: event.itemType });
                 continue;
             }
-
-            // Sync equipment data til database baseret på item type
-            await syncEquipmentToDatabase(event.itemType, rentmanData);
 
             const subprojectId = extractIdFromRef(rentmanData.subproject);
             const projectId = extractIdFromRef(rentmanData.project);
@@ -81,112 +82,6 @@ async function handleEquipmentUpdate(event) {
                 itemRef: item.ref
             });
         }
-    }
-}
-
-/**
- * Håndterer delete events for equipment.
- * Ved delete events indeholder items kun ID'et, ikke ref.
- */
-async function handleEquipmentDelete(event) {
-    for (const itemId of event.items) {
-        try {
-            switch (event.itemType) {
-                case 'ProjectEquipment':
-                    await db.deleteProjectEquipment(itemId);
-                    break;
-                case 'ProjectEquipmentGroup':
-                    await db.deleteProjectEquipmentGroup(itemId);
-                    break;
-                case 'ProjectFunction':
-                    await db.deleteProjectFunction(itemId);
-                    break;
-                case 'ProjectFunctionGroup':
-                    await db.deleteProjectFunctionGroup(itemId);
-                    break;
-                case 'ProjectCost':
-                    await db.deleteProjectCost(itemId);
-                    break;
-                case 'ProjectCrew':
-                    await db.deleteProjectCrew(itemId);
-                    break;
-                default:
-                    logger.debug('Ingen delete handler for itemType', { itemType: event.itemType });
-                    return;
-            }
-            logger.debug(`Slettede ${event.itemType} fra database`, { id: itemId });
-        } catch (error) {
-            logger.error('Fejl ved sletning fra database', {
-                error: error.message,
-                itemType: event.itemType,
-                id: itemId
-            });
-        }
-    }
-}
-
-/**
- * Synkroniserer equipment eller equipment group data til databasen.
- * Henter også tilhørende equipment_group data hvis det er ProjectEquipment.
- */
-async function syncEquipmentToDatabase(itemType, rentmanData) {
-    try {
-        switch (itemType) {
-            case 'ProjectEquipment':
-                await db.upsertProjectEquipment(rentmanData);
-                logger.debug('Synkede project_equipment til database', { id: rentmanData.id });
-                // Hent og upsert tilhørende equipment_group hvis den findes
-                if (rentmanData.equipment_group) {
-                    const eqGroupData = await rentman.get(rentmanData.equipment_group);
-                    if (eqGroupData) {
-                        await db.upsertProjectEquipmentGroup(eqGroupData);
-                        logger.debug('Synkede project_equipment_group til database', { id: eqGroupData.id });
-                    }
-                }
-                break;
-
-            case 'ProjectEquipmentGroup':
-                await db.upsertProjectEquipmentGroup(rentmanData);
-                logger.debug('Synkede project_equipment_group til database', { id: rentmanData.id });
-                break;
-
-            case 'ProjectFunction':
-                await db.upsertProjectFunction(rentmanData);
-                logger.debug('Synkede project_function til database', { id: rentmanData.id });
-                // Hent og upsert tilhørende function_group hvis den findes
-                if (rentmanData.group) {
-                    const fnGroupData = await rentman.get(rentmanData.group);
-                    if (fnGroupData) {
-                        await db.upsertProjectFunctionGroup(fnGroupData);
-                        logger.debug('Synkede project_function_group til database', { id: fnGroupData.id });
-                    }
-                }
-                break;
-
-            case 'ProjectFunctionGroup':
-                await db.upsertProjectFunctionGroup(rentmanData);
-                logger.debug('Synkede project_function_group til database', { id: rentmanData.id });
-                break;
-
-            case 'ProjectCost':
-                await db.upsertProjectCost(rentmanData);
-                logger.debug('Synkede project_cost til database', { id: rentmanData.id });
-                break;
-
-            case 'ProjectCrew':
-                await db.upsertProjectCrew(rentmanData);
-                logger.debug('Synkede project_crew til database', { id: rentmanData.id });
-                break;
-
-            default:
-                logger.debug('Ingen sync handler for itemType', { itemType });
-        }
-    } catch (error) {
-        logger.error('Fejl ved sync til database', {
-            error: error.message,
-            itemType,
-            id: rentmanData.id
-        });
     }
 }
 

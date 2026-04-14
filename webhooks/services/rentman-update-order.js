@@ -21,7 +21,6 @@ async function createOrders(webhook) {
                 continue;
             }
 
-            await syncSubprojectToDatabase(subProjectInfo);
             await ensureOrder(subProjectInfo);
         } catch (error) {
             logger.error('Fejl ved oprettelse af order', {
@@ -43,9 +42,6 @@ async function updateOrders(webhook) {
                 logger.warn('Kunne ikke hente subproject', { ref: item.ref });
                 continue;
             }
-
-            // Sync subproject data til database
-            await syncSubprojectToDatabase(subProjectInfo);
 
             const orderInfo = await ensureOrder(subProjectInfo);
 
@@ -94,31 +90,12 @@ async function deleteOrder(event) {
                     name: syncedOrder.subproject_name
                 }, true);
             }
-
-            // Slet subproject fra database
-            await db.deleteSubproject(subId);
-            logger.debug('Slettede subproject fra database', { id: subId });
         } catch (error) {
             logger.error('Fejl ved sletning af order', {
                 error: error.message,
                 subprojectId: subId
             });
         }
-    }
-}
-
-/**
- * Synkroniserer subproject data til subprojects tabellen.
- */
-async function syncSubprojectToDatabase(subProjectInfo) {
-    try {
-        await db.upsertSubproject(subProjectInfo);
-        logger.debug('Synkede subproject til database', { id: subProjectInfo.id });
-    } catch (error) {
-        logger.error('Fejl ved sync af subproject til database', {
-            error: error.message,
-            id: subProjectInfo.id
-        });
     }
 }
 

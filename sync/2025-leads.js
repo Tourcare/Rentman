@@ -1,4 +1,5 @@
 const db = require('../lib/database');
+const rentmanDb = require('../lib/rentman-db');
 const hubspot = require('../lib/hubspot-client');
 const rentman = require('../lib/rentman-client');
 const { createChildLogger } = require('../lib/logger');
@@ -21,17 +22,27 @@ async function createLeadsFrom2025(options = {}) {
     await syncLogger.start({ batchSize, options });
     */
 
-    const leadsFromSql = await db.query(`
-        SELECT c.rentman_id as rentman_id, c.hubspot_id as hubspot_id, c.name as kontaktperson,  v.name as virksomhed
-        FROM projects as p
-        INNER JOIN synced_contacts as c
-            ON SUBSTRING_INDEX(p.cust_contact, '/', -1) = c.rentman_id
-        INNER JOIN synced_companies as v
-            ON c.hubspot_company_conntected = v.hubspot_id
+    // projects bor i rentman_data, synced_* bor i crm_sync — split i to queries og join i JS.
+    const projectContacts = await rentmanDb.query(`
+        SELECT DISTINCT SUBSTRING_INDEX(p.cust_contact, '/', -1) AS contact_rentman_id
+        FROM projects AS p
         WHERE p.cust_contact IS NOT NULL
-            AND p.project_total_price > 4999
-        GROUP BY kontaktperson
+          AND p.project_total_price > 4999
     `)
+
+    const contactIds = projectContacts.map(r => r.contact_rentman_id).filter(Boolean);
+    let leadsFromSql = [];
+    if (contactIds.length > 0) {
+        const placeholders = contactIds.map(() => '?').join(',');
+        leadsFromSql = await db.query(`
+            SELECT c.rentman_id as rentman_id, c.hubspot_id as hubspot_id, c.name as kontaktperson, v.name as virksomhed
+            FROM synced_contacts as c
+            INNER JOIN synced_companies as v
+                ON c.hubspot_company_conntected = v.hubspot_id
+            WHERE c.rentman_id IN (${placeholders})
+            GROUP BY kontaktperson
+        `, contactIds);
+    }
 
     
     for (const lead of leadsFromSql) {

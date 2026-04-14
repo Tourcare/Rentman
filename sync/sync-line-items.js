@@ -1,4 +1,5 @@
 const db = require('../lib/database');
+const rentmanDb = require('../lib/rentman-db');
 const hubspot = require('../lib/hubspot-client');
 const rentman = require('../lib/rentman-client');
 const { createChildLogger } = require('../lib/logger');
@@ -33,13 +34,13 @@ async function syncFinancialToLineItems(options = {}) {
         FROM synced_deals
     `)
 
-    const dealsLedgerCodes = await db.query(`
-        SELECT 
+    const dealsLedgerCodes = await rentmanDb.query(`
+        SELECT
             p.id AS project_id,
             p.displayname AS project_name,
             SUBSTRING_INDEX(e.ledger, '/', -1) AS ledger_code
         FROM project_equipment AS e
-        LEFT JOIN project_equipment_group AS g
+        LEFT JOIN project_equipment_groups AS g
             ON SUBSTRING_INDEX(e.equipment_group, '/', -1) = g.id
         LEFT JOIN projects AS p
             ON SUBSTRING_INDEX(g.project, '/', -1) = p.id
