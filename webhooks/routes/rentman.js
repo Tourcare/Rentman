@@ -27,7 +27,6 @@ const { createOrders, updateOrders, deleteOrder } = require('../services/rentman
 const { createContact, updateContact, deleteContact } = require('../services/rentman-update-contact');
 const { linkFileToDeal } = require('../services/rentman-quotation-files');
 const { handleEquipmentUpdate } = require('../services/rentman-cost-update');
-const { handleDashboardWebhook } = require('../services/rentman-update-db');
 const { saveWebhookToDb } = require('../services/rentman-save-all');
 
 const logger = createChildLogger('rentman-route');
@@ -199,13 +198,9 @@ async function handleProjectEvent(event) {
 /**
  * Håndterer Subproject events.
  * Subprojects i Rentman mapper til Orders i HubSpot.
- * Opdaterer også dashboard database for planlægningsoversigt.
  */
 async function handleSubprojectEvent(event) {
     const { eventType } = event;
-
-    // Altid opdater dashboard uanset event type
-    handleDashboardWebhook(event);
 
     switch (eventType) {
         case 'create':

@@ -38,16 +38,6 @@ const config = {
             connectionLimit: 10,
             queueLimit: 0
         },
-        // Dashboard database til planlægningsoversigt (project_with_sp tabel)
-        dashboard: {
-            host: process.env.DB_HOST,
-            user: process.env.DB_USER,
-            password: process.env.DB_PASSWORD,
-            database: process.env.DASH_DB_NAME,
-            waitForConnections: true,
-            connectionLimit: 5,
-            queueLimit: 0
-        },
         // Rentman database til komplet spejling af Rentman data
         rentman: {
             host: process.env.DB_HOST,

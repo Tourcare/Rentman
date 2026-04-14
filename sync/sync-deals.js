@@ -277,14 +277,6 @@ async function createSubprojectOrder(subproject, hubspotDealId, companySync, con
             dealSync?.id || 0
         );
 
-        // Opdater dashboard database
-        if (projectId) {
-            const projectData = await rentman.getProject(projectId);
-            if (projectData) {
-                await db.upsertDashboardSubproject({ data: subprojectData }, { data: projectData });
-            }
-        }
-
         await syncLogger.logItem(
             'order',
             result.id,
@@ -331,14 +323,6 @@ async function updateSubprojectOrder(subproject, existingSync, syncLogger) {
 
     await hubspot.updateOrder(existingSync.hubspot_order_id, properties);
     await db.updateSyncedOrderName(subproject.id, subprojectData.displayname || subprojectData.name || 'Unnamed Order');
-
-    // Opdater dashboard database
-    if (projectId) {
-        const projectData = await rentman.getProject(projectId);
-        if (projectData) {
-            await db.upsertDashboardSubproject({ data: subprojectData }, { data: projectData });
-        }
-    }
 
     await syncLogger.logItem(
         'order',

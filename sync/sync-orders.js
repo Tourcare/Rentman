@@ -146,9 +146,6 @@ async function createHubspotOrder(rentmanSubproject, syncLogger) {
             dealSync.id
         );
 
-        // Opdater dashboard database
-        await updateDashboardSubproject(rentmanSubproject, projectId);
-
         await syncLogger.logItem(
             'order',
             result.id,
@@ -177,12 +174,6 @@ async function updateHubspotOrder(rentmanSubproject, existingSync, syncLogger) {
 
     // Opdater navn i database - samme som webhook service
     await db.updateSyncedOrderName(rentmanSubproject.id, rentmanSubproject.displayname);
-
-    // Opdater dashboard database
-    const projectId = extractIdFromRef(rentmanSubproject.project);
-    if (projectId) {
-        await updateDashboardSubproject(rentmanSubproject, projectId);
-    }
 
     await syncLogger.logItem(
         'order',
@@ -231,36 +222,6 @@ async function mapRentmanToHubspotOrder(rentmanSubproject) {
         // Rentman link
         rentman_projekt: rentman.buildProjectUrl ? rentman.buildProjectUrl(projectId, rentmanSubproject.id) : null
     };
-}
-
-/**
- * Opdaterer dashboard database med subproject data.
- * Samme logik som rentman-update-db.js webhook handler.
- */
-async function updateDashboardSubproject(rentmanSubproject, projectId) {
-    try {
-        const projectData = await rentman.getProject(projectId);
-        if (!projectData) {
-            logger.warn('Kunne ikke hente project data til dashboard', { projectId });
-            return;
-        }
-
-        await db.upsertDashboardSubproject(
-            { data: rentmanSubproject },
-            { data: projectData }
-        );
-
-        logger.debug('Opdaterede dashboard database', {
-            subprojectId: rentmanSubproject.id,
-            projectId
-        });
-    } catch (error) {
-        logger.error('Fejl ved opdatering af dashboard database', {
-            subprojectId: rentmanSubproject.id,
-            projectId,
-            error: error.message
-        });
-    }
 }
 
 async function updateParentDealStatus(hubspotDealId) {
@@ -424,12 +385,6 @@ async function syncOrderFinancials(rentmanSubprojectId) {
         await hubspot.updateOrder(existingSync.hubspot_order_id, {
             hs_total_price: totalPrice
         });
-
-        // Opdater dashboard database
-        const projectId = extractIdFromRef(rentmanSubproject.project);
-        if (projectId) {
-            await updateDashboardSubproject(rentmanSubproject, projectId);
-        }
 
         await syncLogger.logItem(
             'order',
