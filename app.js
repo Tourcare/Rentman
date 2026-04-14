@@ -161,6 +161,20 @@ app.get('/sync-count', async (req, res) => {
     res.json({ type, table: config.table, count: rows[0].count });
 });
 
+// Sync count fra Rentman API (1 API kald, limit=1 for at få itemCount)
+app.get('/sync-count-api', async (req, res) => {
+    const endpoint = req.query.endpoint || '/projectequipment';
+    const response = await fetch(`${config.rentman.baseUrl}${endpoint}?fields=id&limit=1`, {
+        headers: {
+            'Authorization': `Bearer ${config.rentman.token}`,
+            'Content-Type': 'application/json'
+        }
+    });
+    if (!response.ok) return res.status(502).json({ error: 'Rentman API fejl', status: response.status });
+    const json = await response.json();
+    res.json({ endpoint, itemCount: json.itemCount });
+});
+
 // Health check endpoint til load balancer/monitoring
 app.get('/health', (req, res) => {
     res.json({
